@@ -79,11 +79,25 @@ tbody tr:last-child td { border-bottom: 2px solid ${ROJO}; }
 .pie { margin-top: 30px; padding-top: 12px; border-top: 2px solid ${ROJO}; text-align: center; }
 .pie-logo { font-family: Georgia, serif; font-size: 14px; font-weight: 900; color: ${ROJO}; }
 .pie-info { font-size: 9px; color: #828282; margin-top: 3px; }
-.actions { position: fixed; bottom: 20px; right: 20px; z-index: 100; }
-.actions button { background: ${ROJO}; color: #fff; border: none; padding: 14px 24px; border-radius: 10px; font-size: 15px; font-weight: 700; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
-@media print { .actions { display: none !important; } }
+.actions { position: fixed; bottom: 20px; right: 20px; z-index: 100; display: flex; gap: 10px; }
+.actions button { color: #fff; border: none; padding: 14px 22px; border-radius: 10px; font-size: 14px; font-weight: 700; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
+.btn-imprimir { background: #374151; }
+.btn-descargar { background: ${ROJO}; }
+.aviso-descarga { position: fixed; bottom: 76px; right: 20px; background: #1f2937; color: #fff; padding: 10px 14px; border-radius: 8px; font-size: 12px; max-width: 260px; z-index: 100; line-height: 1.4; box-shadow: 0 4px 12px rgba(0,0,0,0.25); }
+@media print { .actions, .aviso-descarga { display: none !important; } }
 </style></head><body>
-<div class="actions"><button onclick="window.print()">🖨️ Imprimir / Guardar PDF</button></div>
+<div class="aviso-descarga" id="avisoDesc" style="display:none">Para <b>descargar el PDF</b>: en la ventana de impresión, elige como destino <b>"Guardar como PDF"</b>.</div>
+<div class="actions">
+  <button class="btn-imprimir" onclick="window.print()">🖨️ Imprimir</button>
+  <button class="btn-descargar" onclick="descargarPDF()">📥 Descargar PDF</button>
+</div>
+<script>
+  function descargarPDF() {
+    var a = document.getElementById('avisoDesc');
+    if (a) a.style.display = 'block';
+    setTimeout(function(){ window.print(); }, 400);
+  }
+</script>
 <div class="top-bar"></div>
 <div class="header">
   <div>

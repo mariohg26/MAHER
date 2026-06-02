@@ -44,6 +44,7 @@ export default function Facturas() {
   const [guardando, setGuardando] = useState(false)
   const [aviso, setAviso] = useState(null)
   const [cobroParcial, setCobroParcial] = useState(null) // {factura, importe}
+  const [recordatorio, setRecordatorio] = useState(null)  // factura para recordar cobro
 
   const getCliente = (id) => clientes.items.find(c => c.id === id)
 
@@ -354,6 +355,11 @@ export default function Facturas() {
     )
   }
 
+  // ══════════════════ MODAL RECORDATORIO DE COBRO ══════════════════
+  if (recordatorio) {
+    return <RecordatorioCobro factura={recordatorio} cliente={getCliente(recordatorio.cliente_id)} onClose={() => setRecordatorio(null)} />
+  }
+
   // ══════════════════ MODAL COBRO PARCIAL ══════════════════
   if (cobroParcial) {
     const t = calcTotales(cobroParcial.factura)
@@ -457,6 +463,7 @@ export default function Facturas() {
                   <Btn onClick={() => editarFactura(f)} bg="#f9fafb" col="#374151">✏️ Editar</Btn>
                   {f.estado !== 'cobrada' && <Btn onClick={() => marcarCobrada(f)} bg="#d1fae5" col="#065f46">✓ Cobrada</Btn>}
                   {f.estado !== 'cobrada' && <Btn onClick={() => setCobroParcial({ factura: f, importe: '' })} bg="#fef9c3" col="#854d0e">💶 Cobro parcial</Btn>}
+                  <Btn onClick={() => setRecordatorio(f)} bg="#dcfce7" col="#166534">💬 WhatsApp / Email</Btn>
                   <Btn onClick={() => duplicar(f)} bg="#ede9fe" col="#5b21b6">📋 Duplicar</Btn>
                   <Btn onClick={() => rectificar(f)} bg="#fff7ed" col="#9a3412">🔄 Rectificar</Btn>
                   <Btn onClick={() => eliminar(f)} bg="#fef2f2" col="#991b1b">🗑️ Eliminar</Btn>
@@ -514,6 +521,143 @@ function Aviso({ aviso }) {
       border: `1.5px solid ${ok ? '#86efac' : '#fecaca'}`,
       borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 14, fontWeight: 600,
     }}>{ok ? '✅ ' : '⚠️ '}{aviso.texto}</div>
+  )
+}
+
+// ─── Recordatorio de cobro por WhatsApp / Email ───
+const EMPRESA_NOMBRE = 'Quesos Maher SL'
+const EMPRESA_NIF = 'B37267259'
+
+function RecordatorioCobro({ factura, cliente, onClose }) {
+  const [tono, setTono] = useState('envio')   // envio | amable | firme | ultima
+  const [canal, setCanal] = useState('whatsapp') // whatsapp | email
+  const [copiado, setCopiado] = useState(false)
+
+  const totales = calcTotales(factura)
+  const diasVencido = factura.vencimiento
+    ? Math.floor((new Date() - new Date(factura.vencimiento + 'T00:00:00')) / 86400000)
+    : 0
+
+  const nombreCli = cliente?.razon_social || ''
+
+  const plantillas = {
+    envio: {
+      whatsapp: `Hola ${nombreCli}, te enviamos desde ${EMPRESA_NOMBRE} la factura nº ${factura.id} de fecha ${fmtDate(factura.fecha)} por importe de ${fmt(totales.total)}.\\n\\nSi necesitas cualquier aclaración, no dudes en contactarnos.\\n\\nMuchas gracias por tu confianza.\\nUn saludo,\\n${EMPRESA_NOMBRE}`,
+      email: `Estimado/a cliente,\\n\\nLe adjuntamos la factura nº ${factura.id} de fecha ${fmtDate(factura.fecha)} por importe de ${fmt(totales.total)}.\\n\\nQuedamos a su disposición para cualquier aclaración.\\n\\nUn cordial saludo,\\n${EMPRESA_NOMBRE}\\nNIF: ${EMPRESA_NIF}`,
+    },
+    amable: {
+      whatsapp: `Hola ${nombreCli}, te escribimos desde ${EMPRESA_NOMBRE} para recordarte que tienes pendiente la factura nº ${factura.id} de fecha ${fmtDate(factura.fecha)} por importe de ${fmt(totales.total)}.\n\nPor favor, confirma si la has recibido y cuándo podrás abonarla. Si ya has hecho el pago, ignora este mensaje.\n\nMuchas gracias.\nUn saludo,\n${EMPRESA_NOMBRE}`,
+      email: `Estimado/a cliente,\n\nLe escribimos para recordarle que tiene pendiente la factura nº ${factura.id} de fecha ${fmtDate(factura.fecha)} por importe de ${fmt(totales.total)}.\n\nLe rogamos confirme la recepción y proceda al pago a la mayor brevedad. En caso de haberlo abonado ya, le rogamos disculpe este mensaje.\n\nUn cordial saludo,\n${EMPRESA_NOMBRE}\nNIF: ${EMPRESA_NIF}`,
+    },
+    firme: {
+      whatsapp: `Hola ${nombreCli}, volvemos a contactarte respecto a la factura nº ${factura.id} por importe de ${fmt(totales.total)} con vencimiento del ${fmtDate(factura.vencimiento)}.\n\nLleva ${diasVencido} días vencida. ¿Puedes indicarnos cuándo podrás abonarla? Si hay algún problema, dínoslo y buscamos una solución.\n\nQuedamos a la espera de tu respuesta.\n${EMPRESA_NOMBRE}`,
+      email: `Estimado/a cliente,\n\nNos ponemos en contacto de nuevo respecto a la factura nº ${factura.id} de ${fmtDate(factura.fecha)}, por importe de ${fmt(totales.total)}, vencida el ${fmtDate(factura.vencimiento)} (${diasVencido} días).\n\nLe rogamos contacte con nosotros para indicarnos cuándo podrá efectuar el pago o si necesita un plan de pago.\n\nUn cordial saludo,\n${EMPRESA_NOMBRE}`,
+    },
+    ultima: {
+      whatsapp: `Hola, esta es una última comunicación respecto a la factura nº ${factura.id} de ${fmt(totales.total)} vencida hace ${diasVencido} días.\n\nNo hemos recibido respuesta a comunicaciones anteriores. Le rogamos contacte en los próximos 7 días o nos veremos obligados a iniciar acciones legales para el cobro de la deuda.\n\n${EMPRESA_NOMBRE}`,
+      email: `Estimado/a cliente,\n\nLe remitimos esta comunicación formal respecto a la factura nº ${factura.id} de fecha ${fmtDate(factura.fecha)}, por importe de ${fmt(totales.total)}, vencida el ${fmtDate(factura.vencimiento)} (${diasVencido} días).\n\nHabiendo realizado comunicaciones previas sin respuesta, le comunicamos que si en el plazo de 7 días naturales no se procede al abono de la cantidad adeudada, nos veremos obligados a iniciar las acciones legales correspondientes para el cobro de la deuda, intereses de demora y costas, conforme a la Ley 3/2004 de lucha contra la morosidad.\n\nEsperamos no llegar a esta situación. Le rogamos contacte a la mayor brevedad.\n\nAtentamente,\n${EMPRESA_NOMBRE}\nNIF: ${EMPRESA_NIF}`,
+    },
+  }
+
+  const mensaje = plantillas[tono][canal]
+
+  async function copiar() {
+    try {
+      await navigator.clipboard.writeText(mensaje)
+      setCopiado(true)
+      setTimeout(() => setCopiado(false), 2500)
+    } catch (e) {
+      alert('No se pudo copiar automáticamente. Selecciónalo y cópialo a mano.')
+    }
+  }
+
+  function abrirWhatsApp() {
+    const tel = (cliente?.telefono || '').replace(/\D/g, '')
+    const url = tel
+      ? `https://wa.me/${tel}?text=${encodeURIComponent(mensaje)}`
+      : `https://wa.me/?text=${encodeURIComponent(mensaje)}`
+    window.open(url, '_blank')
+  }
+
+  function abrirEmail() {
+    const email = cliente?.email || ''
+    const asunto = `Factura pendiente nº ${factura.id}`
+    window.location.href = `mailto:${email}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(mensaje)}`
+  }
+
+  const tonoBtn = (val, label, color) => (
+    <button onClick={() => setTono(val)} style={{
+      flex: 1, padding: 10, borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer',
+      border: '1.5px solid ' + (tono === val ? color : '#e5e7eb'),
+      background: tono === val ? color : '#fff',
+      color: tono === val ? '#fff' : '#374151',
+    }}>{label}</button>
+  )
+  const canalBtn = (val, label, color) => (
+    <button onClick={() => setCanal(val)} style={{
+      flex: 1, padding: 10, borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer',
+      border: '1.5px solid ' + (canal === val ? color : '#e5e7eb'),
+      background: canal === val ? color : '#fff',
+      color: canal === val ? '#fff' : '#374151',
+    }}>{label}</button>
+  )
+
+  return (
+    <div style={{ maxWidth: 600, margin: '20px auto' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <h2 style={{ fontSize: 20, fontWeight: 900, margin: 0 }}>💬 Enviar / recordar por WhatsApp o email</h2>
+        <button onClick={onClose} style={{ background: '#f3f4f6', border: 'none', borderRadius: 8, padding: '8px 14px', fontWeight: 700, cursor: 'pointer' }}>← Volver</button>
+      </div>
+
+      <div style={{ background: '#fef3c7', padding: 12, borderRadius: 10, marginBottom: 16, fontSize: 13 }}>
+        <strong>{factura.id}</strong> · {nombreCli || '—'}<br />
+        Importe: <strong>{fmt(totales.total)}</strong> · Vence: {fmtDate(factura.vencimiento)}
+        {diasVencido > 0 && <span style={{ color: '#dc2626', fontWeight: 700, marginLeft: 8 }}>· ¡{diasVencido} días vencida!</span>}
+      </div>
+
+      {!cliente?.telefono && canal === 'whatsapp' && (
+        <div style={{ background: '#fee2e2', color: '#991b1b', padding: 10, borderRadius: 8, fontSize: 13, marginBottom: 12 }}>
+          Este cliente no tiene teléfono guardado. Se abrirá WhatsApp para que elijas el contacto.
+        </div>
+      )}
+
+      <div style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', marginBottom: 6 }}>Tipo de mensaje</div>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
+        {tonoBtn('envio', '📤 Enviar factura', '#1a56db')}
+        {tonoBtn('amable', '🙂 Recordar (amable)', '#10b981')}
+        {tonoBtn('firme', '😐 Firme', '#f59e0b')}
+        {tonoBtn('ultima', '😠 Última', '#dc2626')}
+      </div>
+
+      <div style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', marginBottom: 6 }}>Canal</div>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
+        {canalBtn('whatsapp', '📱 WhatsApp', '#25d366')}
+        {canalBtn('email', '📧 Email', '#1a56db')}
+      </div>
+
+      <textarea value={mensaje} readOnly rows={11}
+        style={{ width: '100%', border: '1.5px solid #e5e7eb', borderRadius: 10, padding: 12, fontSize: 13, background: '#fafafa', fontFamily: 'inherit', resize: 'vertical', boxSizing: 'border-box', marginBottom: 12 }} />
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        <button onClick={copiar} style={{ padding: 13, borderRadius: 10, border: 'none', background: '#1a56db', color: '#fff', fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>
+          {copiado ? '✓ Copiado' : '📋 Copiar mensaje'}
+        </button>
+        {canal === 'whatsapp' ? (
+          <button onClick={abrirWhatsApp} style={{ padding: 13, borderRadius: 10, border: 'none', background: '#25d366', color: '#fff', fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>📱 Abrir WhatsApp</button>
+        ) : (
+          <button onClick={abrirEmail} style={{ padding: 13, borderRadius: 10, border: 'none', background: '#1a56db', color: '#fff', fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>📧 Abrir email</button>
+        )}
+      </div>
+
+      <button onClick={() => abrirPDFFactura(factura, cliente)}
+        style={{ width: '100%', marginTop: 10, padding: 13, borderRadius: 10, border: '1.5px solid #1e40af', background: '#eff6ff', color: '#1e40af', fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>
+        📄 Abrir el PDF (para adjuntarlo)
+      </button>
+
+      <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, padding: 10, marginTop: 10, fontSize: 12, color: '#075985', lineHeight: 1.5 }}>
+        💡 <strong>Para enviar el PDF por WhatsApp:</strong> pulsa "Abrir WhatsApp" (se manda el texto), y luego adjunta el PDF descargándolo con el botón de arriba. WhatsApp no permite adjuntar archivos automáticamente por seguridad.
+      </div>
+    </div>
   )
 }
 
