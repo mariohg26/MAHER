@@ -145,6 +145,25 @@ export async function miEmpresaId() {
   return data?.empresa_id || null
 }
 
+// ─────────────────────────────────────────────
+// ADJUNTOS (Supabase Storage) — para tickets/facturas de gastos
+// ─────────────────────────────────────────────
+const BUCKET = 'adjuntos'
+
+// Sube un archivo y devuelve la URL pública
+export async function subirAdjunto(file) {
+  const ext = (file.name.split('.').pop() || 'dat').toLowerCase()
+  const nombre = `gasto_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`
+  const { error } = await supabase.storage.from(BUCKET).upload(nombre, file, {
+    cacheControl: '3600',
+    upsert: false,
+  })
+  if (error) throw error
+  const { data } = supabase.storage.from(BUCKET).getPublicUrl(nombre)
+  return data.publicUrl
+}
+
+
 // Siguiente número de factura correlativo (F-2026-XXX)
 export async function siguienteNumeroFactura(empresaId, prefijo = 'F', anio) {
   const year = anio || new Date().getFullYear()
