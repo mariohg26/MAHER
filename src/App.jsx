@@ -8,6 +8,7 @@ import {
 import Login from './Login'
 import Clientes from './Clientes'
 import Proveedores from './Proveedores'
+import Facturas from './Facturas'
 
 const ROJO = '#c81019'
 
@@ -57,13 +58,15 @@ function AppContent({ usuario, onLogout }) {
       {/* Menú de navegación */}
       <div style={{ background: '#fff', borderBottom: '1px solid #eee', padding: '0 16px', display: 'flex', gap: 4, maxWidth: 900, margin: '0 auto' }}>
         <Pestana activa={seccion === 'inicio'} onClick={() => setSeccion('inicio')}>Inicio</Pestana>
+        <Pestana activa={seccion === 'facturas'} onClick={() => setSeccion('facturas')}>Facturas</Pestana>
         <Pestana activa={seccion === 'clientes'} onClick={() => setSeccion('clientes')}>Clientes</Pestana>
         <Pestana activa={seccion === 'proveedores'} onClick={() => setSeccion('proveedores')}>Proveedores</Pestana>
       </div>
 
       {/* Contenido */}
       <div style={{ padding: 16, maxWidth: 900, margin: '0 auto' }}>
-        {seccion === 'inicio' && <Inicio usuario={usuario} irAClientes={() => setSeccion('clientes')} irAProveedores={() => setSeccion('proveedores')} />}
+        {seccion === 'inicio' && <Inicio usuario={usuario} irAClientes={() => setSeccion('clientes')} irAProveedores={() => setSeccion('proveedores')} irAFacturas={() => setSeccion('facturas')} />}
+        {seccion === 'facturas' && <Facturas />}
         {seccion === 'clientes' && <Clientes />}
         {seccion === 'proveedores' && <Proveedores />}
       </div>
@@ -85,7 +88,7 @@ function Pestana({ activa, onClick, children }) {
   )
 }
 
-function Inicio({ usuario, irAClientes, irAProveedores }) {
+function Inicio({ usuario, irAClientes, irAProveedores, irAFacturas }) {
   const facturas = useColeccion(facturasApi)
   const gastos = useColeccion(gastosApi)
   const clientes = useColeccion(clientesApi)
@@ -112,7 +115,7 @@ function Inicio({ usuario, irAClientes, irAProveedores }) {
         <div style={{ textAlign: 'center', padding: 40, color: '#9ca3af' }}>Cargando datos…</div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          <Tarjeta label="Facturas" valor={facturas.items.length} />
+          <Tarjeta label="Facturas" valor={facturas.items.length} onClick={irAFacturas} clicable />
           <Tarjeta label="Gastos" valor={gastos.items.length} />
           <Tarjeta label="Clientes" valor={clientes.items.length} onClick={irAClientes} clicable />
           <Tarjeta label="Proveedores" valor={proveedores.items.length} onClick={irAProveedores} clicable />
