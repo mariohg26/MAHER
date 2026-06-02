@@ -7,6 +7,7 @@ import {
 } from './lib/api'
 import Login from './Login'
 import Clientes from './Clientes'
+import Proveedores from './Proveedores'
 
 const ROJO = '#c81019'
 
@@ -57,12 +58,14 @@ function AppContent({ usuario, onLogout }) {
       <div style={{ background: '#fff', borderBottom: '1px solid #eee', padding: '0 16px', display: 'flex', gap: 4, maxWidth: 900, margin: '0 auto' }}>
         <Pestana activa={seccion === 'inicio'} onClick={() => setSeccion('inicio')}>Inicio</Pestana>
         <Pestana activa={seccion === 'clientes'} onClick={() => setSeccion('clientes')}>Clientes</Pestana>
+        <Pestana activa={seccion === 'proveedores'} onClick={() => setSeccion('proveedores')}>Proveedores</Pestana>
       </div>
 
       {/* Contenido */}
       <div style={{ padding: 16, maxWidth: 900, margin: '0 auto' }}>
-        {seccion === 'inicio' && <Inicio usuario={usuario} irAClientes={() => setSeccion('clientes')} />}
+        {seccion === 'inicio' && <Inicio usuario={usuario} irAClientes={() => setSeccion('clientes')} irAProveedores={() => setSeccion('proveedores')} />}
         {seccion === 'clientes' && <Clientes />}
+        {seccion === 'proveedores' && <Proveedores />}
       </div>
     </div>
   )
@@ -82,7 +85,7 @@ function Pestana({ activa, onClick, children }) {
   )
 }
 
-function Inicio({ usuario, irAClientes }) {
+function Inicio({ usuario, irAClientes, irAProveedores }) {
   const facturas = useColeccion(facturasApi)
   const gastos = useColeccion(gastosApi)
   const clientes = useColeccion(clientesApi)
@@ -112,7 +115,7 @@ function Inicio({ usuario, irAClientes }) {
           <Tarjeta label="Facturas" valor={facturas.items.length} />
           <Tarjeta label="Gastos" valor={gastos.items.length} />
           <Tarjeta label="Clientes" valor={clientes.items.length} onClick={irAClientes} clicable />
-          <Tarjeta label="Proveedores" valor={proveedores.items.length} />
+          <Tarjeta label="Proveedores" valor={proveedores.items.length} onClick={irAProveedores} clicable />
           <Tarjeta label="Presupuestos" valor={presupuestos.items.length} />
           <Tarjeta label="Tareas" valor={tareas.items.length} />
         </div>
