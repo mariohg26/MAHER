@@ -132,6 +132,19 @@ export const usuariosApi = crudFactory('usuarios', 'nombre', true)
 // HELPERS específicos
 // ─────────────────────────────────────────────
 
+// Obtener el empresa_id del usuario que ha iniciado sesión
+export async function miEmpresaId() {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return null
+  const { data, error } = await supabase
+    .from('usuarios')
+    .select('empresa_id')
+    .eq('id', user.id)
+    .single()
+  if (error) throw error
+  return data?.empresa_id || null
+}
+
 // Siguiente número de factura correlativo (F-2026-XXX)
 export async function siguienteNumeroFactura(empresaId, prefijo = 'F', anio) {
   const year = anio || new Date().getFullYear()
