@@ -12,6 +12,7 @@ import Facturas from './Facturas'
 import Presupuestos from './Presupuestos'
 import Informes from './Informes'
 import Ajustes from './Ajustes'
+import Dashboard from './Dashboard'
 import Gastos from './Gastos'
 
 const ROJO = '#c81019'
@@ -73,7 +74,7 @@ function AppContent({ usuario, onLogout }) {
 
       {/* Contenido */}
       <div style={{ padding: 16, maxWidth: 900, margin: '0 auto' }}>
-        {seccion === 'inicio' && <Inicio usuario={usuario} irAClientes={() => setSeccion('clientes')} irAProveedores={() => setSeccion('proveedores')} irAFacturas={() => setSeccion('facturas')} irAGastos={() => setSeccion('gastos')} irAPresupuestos={() => setSeccion('presupuestos')} />}
+        {seccion === 'inicio' && <Dashboard usuario={usuario} onNavegar={setSeccion} />}
         {seccion === 'facturas' && <Facturas />}
         {seccion === 'presupuestos' && <Presupuestos />}
         {seccion === 'gastos' && <Gastos />}
