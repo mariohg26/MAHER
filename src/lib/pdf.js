@@ -35,9 +35,10 @@ function direccionCliente(c) {
 export function abrirPDFFactura(doc, cliente) {
   const totales = calcTotales(doc)
   const dir = direccionCliente(cliente)
+  const tipoDoc = doc._tipo || 'FACTURA'
 
   const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
-<title>FACTURA ${doc.id} - ${EMPRESA.nombre}</title>
+<title>${tipoDoc} ${doc.id} - ${EMPRESA.nombre}</title>
 <style>
 @page { size: A4; margin: 12mm; }
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -111,7 +112,7 @@ tbody tr:last-child td { border-bottom: 2px solid ${ROJO}; }
   </div>
 </div>
 <div class="titulo-doc">
-  <div><h1>FACTURA</h1><div class="num">Nº ${doc.id}</div></div>
+  <div><h1>${tipoDoc}</h1><div class="num">Nº ${doc.id}</div></div>
   <div class="fecha-box">
     <div class="lbl">Fecha emisión</div><div class="val">${fmtDate(doc.fecha)}</div>
     <div class="sub">Vence: ${fmtDate(doc.vencimiento)}</div>
