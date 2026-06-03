@@ -10,6 +10,8 @@ import Clientes from './Clientes'
 import Proveedores from './Proveedores'
 import Facturas from './Facturas'
 import Presupuestos from './Presupuestos'
+import Informes from './Informes'
+import Ajustes from './Ajustes'
 import Gastos from './Gastos'
 
 const ROJO = '#c81019'
@@ -65,6 +67,8 @@ function AppContent({ usuario, onLogout }) {
         <Pestana activa={seccion === 'gastos'} onClick={() => setSeccion('gastos')}>Gastos</Pestana>
         <Pestana activa={seccion === 'clientes'} onClick={() => setSeccion('clientes')}>Clientes</Pestana>
         <Pestana activa={seccion === 'proveedores'} onClick={() => setSeccion('proveedores')}>Proveedores</Pestana>
+        <Pestana activa={seccion === 'informes'} onClick={() => setSeccion('informes')}>Informes</Pestana>
+        <Pestana activa={seccion === 'ajustes'} onClick={() => setSeccion('ajustes')}>Ajustes</Pestana>
       </div>
 
       {/* Contenido */}
@@ -75,6 +79,8 @@ function AppContent({ usuario, onLogout }) {
         {seccion === 'gastos' && <Gastos />}
         {seccion === 'clientes' && <Clientes />}
         {seccion === 'proveedores' && <Proveedores />}
+        {seccion === 'informes' && <Informes />}
+        {seccion === 'ajustes' && <Ajustes usuario={usuario} />}
       </div>
     </div>
   )
