@@ -1,4 +1,4 @@
-import { supabase } from './supabase'
+import { supabase, clienteAislado } from './supabase'
 
 // ═══════════════════════════════════════════════════════════════════
 // CAPA DE ACCESO A DATOS
@@ -182,14 +182,16 @@ export async function siguienteNumeroFactura(empresaId, prefijo = 'F', anio) {
   return `${prefijo}-${year}-${siguiente}`
 }
 
-// Crear un usuario nuevo (solo admin). Crea en Auth + en tabla usuarios.
-// NOTA: requiere que el admin tenga permisos; en Supabase esto idealmente
-// se hace con una Edge Function por seguridad. Versión simple aquí.
+// Crear un usuario nuevo (solo admin).
+// Usa un cliente AISLADO para no afectar la sesión del admin actual.
 export async function crearUsuario({ email, password, nombre, rol, empresaId }) {
-  // 1) Crear en Auth
-  const { data: authData, error: authError } = await supabase.auth.signUp({ email, password })
+  const aislado = clienteAislado()
+  // 1) Crear en Auth con el cliente aislado (no toca tu sesión)
+  const { data: authData, error: authError } = await aislado.auth.signUp({ email, password })
   if (authError) throw authError
-  // 2) Crear en tabla usuarios
+  if (!authData.user) throw new Error('No se pudo crear el usuario en el sistema de acceso.')
+
+  // 2) Crear la ficha en la tabla usuarios (con el cliente normal, que tiene tu sesión de admin)
   const { data, error } = await supabase
     .from('usuarios')
     .insert({
@@ -200,6 +202,20 @@ export async function crearUsuario({ email, password, nombre, rol, empresaId }) 
       empresa_id: empresaId,
       activo: true,
     })
+    .select()
+    .single()
+  if (error) throw error
+  // Cerrar la sesión del cliente aislado por si acaso
+  try { await aislado.auth.signOut() } catch (e) {}
+  return data
+}
+
+// Actualizar datos de un usuario (nombre, rol, activo)
+export async function actualizarUsuario(id, cambios) {
+  const { data, error } = await supabase
+    .from('usuarios')
+    .update(cambios)
+    .eq('id', id)
     .select()
     .single()
   if (error) throw error

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useColeccion } from './hooks/useColeccion'
 import {
   empresaApi, usuariosApi, facturasApi, presupuestosApi,
-  gastosApi, clientesApi, proveedoresApi, miEmpresaId, crearUsuario,
+  gastosApi, clientesApi, proveedoresApi, miEmpresaId, crearUsuario, actualizarUsuario,
 } from './lib/api'
 
 const ROJO = '#c81019'
@@ -422,7 +422,8 @@ function Backup() {
 // ══════════════════ USUARIOS ══════════════════
 function Usuarios({ usuario }) {
   const usuarios = useColeccion(usuariosApi)
-  const [form, setForm] = useState(null)
+  const [form, setForm] = useState(null)         // crear nuevo
+  const [editando, setEditando] = useState(null) // editar existente
   const [creando, setCreando] = useState(false)
   const [aviso, setAviso] = useState(null)
   const esAdmin = usuario?.rol === 'admin'
@@ -442,18 +443,37 @@ function Usuarios({ usuario }) {
     } finally { setCreando(false) }
   }
 
+  async function guardarEdicion() {
+    if (!editando.nombre.trim()) { setAviso({ tipo: 'error', texto: 'El nombre no puede estar vacío' }); return }
+    setCreando(true); setAviso(null)
+    try {
+      await actualizarUsuario(editando.id, { nombre: editando.nombre.trim(), rol: editando.rol, activo: editando.activo })
+      setAviso({ tipo: 'ok', texto: 'Usuario actualizado' })
+      setEditando(null); usuarios.recargar()
+    } catch (e) {
+      setAviso({ tipo: 'error', texto: 'Error: ' + (e.message || e) })
+    } finally { setCreando(false) }
+  }
+
   return (
     <Tarjeta>
       {aviso && <Aviso aviso={aviso} />}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
         <h3 style={{ fontSize: 16, fontWeight: 800, margin: 0 }}>Usuarios de la empresa</h3>
-        {esAdmin && !form && (
+        {esAdmin && !form && !editando && (
           <button onClick={() => setForm({ nombre: '', email: '', password: '', rol: 'empleado' })} style={btnMini}>+ Nuevo usuario</button>
         )}
       </div>
-      {!esAdmin && <p style={{ fontSize: 13, color: '#9ca3af', marginBottom: 12 }}>Solo los administradores pueden crear usuarios.</p>}
+      {!esAdmin && <p style={{ fontSize: 13, color: '#9ca3af', marginBottom: 12 }}>Solo los administradores pueden crear o editar usuarios.</p>}
+
+      <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 12.5, color: '#92400e', lineHeight: 1.5 }}>
+        ℹ️ Al crear un usuario, podrá entrar con el email y la contraseña que le pongas. Si no puede entrar, revisa el ajuste de confirmación de email en Supabase (te lo explico en el chat).
+      </div>
+
+      {/* Formulario crear */}
       {form && (
         <div style={{ background: '#f9fafb', borderRadius: 12, padding: 16, marginBottom: 16, border: '1px solid #f0f0f0' }}>
+          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 12 }}>Nuevo usuario</div>
           <Campo label="Nombre"><input style={inp} value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} /></Campo>
           <Campo label="Email"><input style={inp} type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></Campo>
           <Campo label="Contraseña (mínimo 6 caracteres)"><input style={inp} type="text" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} /></Campo>
@@ -468,19 +488,48 @@ function Usuarios({ usuario }) {
           </div>
         </div>
       )}
+
+      {/* Formulario editar */}
+      {editando && (
+        <div style={{ background: '#f9fafb', borderRadius: 12, padding: 16, marginBottom: 16, border: '1px solid #f0f0f0' }}>
+          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 12 }}>Editar usuario</div>
+          <Campo label="Nombre"><input style={inp} value={editando.nombre} onChange={e => setEditando({ ...editando, nombre: e.target.value })} /></Campo>
+          <Campo label="Email (no se puede cambiar)"><input style={{ ...inp, background: '#f3f4f6', color: '#9ca3af' }} value={editando.email} disabled /></Campo>
+          <Campo label="Rol">
+            <select style={inp} value={editando.rol} onChange={e => setEditando({ ...editando, rol: e.target.value })} disabled={editando.id === usuario?.id}>
+              <option value="empleado">Empleado</option><option value="admin">Administrador</option>
+            </select>
+          </Campo>
+          <Toggle label="Usuario activo (puede entrar)" checked={editando.activo} onChange={v => setEditando({ ...editando, activo: v })} />
+          {editando.id === usuario?.id && <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 12 }}>No puedes cambiar tu propio rol.</p>}
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button onClick={() => setEditando(null)} disabled={creando} style={{ flex: 1, padding: 12, borderRadius: 10, border: '1.5px solid #e5e7eb', background: '#fff', fontWeight: 700, cursor: 'pointer' }}>Cancelar</button>
+            <button onClick={guardarEdicion} disabled={creando} style={{ flex: 2, padding: 12, borderRadius: 10, border: 'none', background: ROJO, color: '#fff', fontWeight: 800, cursor: 'pointer', opacity: creando ? 0.6 : 1 }}>{creando ? 'Guardando…' : 'Guardar cambios'}</button>
+          </div>
+        </div>
+      )}
+
+      {/* Lista */}
       {usuarios.cargando ? (
         <div style={{ textAlign: 'center', padding: 20, color: '#9ca3af' }}>Cargando…</div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {usuarios.items.map(u => (
-            <div key={u.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 12, background: '#f9fafb', borderRadius: 10 }}>
-              <div>
+            <div key={u.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 12, background: '#f9fafb', borderRadius: 10, opacity: u.activo === false ? 0.5 : 1 }}>
+              <div style={{ minWidth: 0, flex: 1 }}>
                 <div style={{ fontWeight: 700, fontSize: 14 }}>{u.nombre} {u.id === usuario?.id && <span style={{ color: '#9ca3af', fontWeight: 500 }}>(tú)</span>}</div>
                 <div style={{ fontSize: 12, color: '#9ca3af' }}>{u.email}</div>
+                {u.activo === false && <div style={{ fontSize: 11, color: '#991b1b', fontWeight: 700 }}>Desactivado</div>}
               </div>
-              <span style={{ background: u.rol === 'admin' ? '#ede9fe' : '#f1f5f9', color: u.rol === 'admin' ? '#5b21b6' : '#475569', fontSize: 11, fontWeight: 800, padding: '4px 10px', borderRadius: 20 }}>
-                {u.rol === 'admin' ? 'Administrador' : 'Empleado'}
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ background: u.rol === 'admin' ? '#ede9fe' : '#f1f5f9', color: u.rol === 'admin' ? '#5b21b6' : '#475569', fontSize: 11, fontWeight: 800, padding: '4px 10px', borderRadius: 20 }}>
+                  {u.rol === 'admin' ? 'Administrador' : 'Empleado'}
+                </span>
+                {esAdmin && (
+                  <button onClick={() => setEditando({ id: u.id, nombre: u.nombre, email: u.email, rol: u.rol, activo: u.activo !== false })}
+                    style={{ border: 'none', background: '#eff6ff', color: '#1e40af', borderRadius: 8, padding: '6px 10px', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>✏️ Editar</button>
+                )}
+              </div>
             </div>
           ))}
         </div>
