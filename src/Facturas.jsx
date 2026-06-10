@@ -1,10 +1,18 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useColeccion } from './hooks/useColeccion'
-import { facturasApi, clientesApi, miEmpresaId, siguienteNumeroFactura } from './lib/api'
+import { facturasApi, clientesApi, miEmpresaId, siguienteNumeroFactura, empresaApi } from './lib/api'
 import { abrirPDFFactura } from './lib/pdf'
 
 const ROJO = '#c81019'
 const HOY = new Date().toISOString().split('T')[0]
+
+// Suma días a una fecha (YYYY-MM-DD) y devuelve otra fecha YYYY-MM-DD
+function sumarDias(fechaStr, dias) {
+  if (!fechaStr || !dias) return ''
+  const d = new Date(fechaStr + 'T00:00:00')
+  d.setDate(d.getDate() + Number(dias))
+  return d.toISOString().split('T')[0]
+}
 
 // ─── Helpers de cálculo (idénticos a la app original) ───
 const fmt = (n) => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(n || 0)
@@ -25,6 +33,12 @@ function limpiarFechas(obj) {
   const o = { ...obj }
   if (!o.vencimiento) o.vencimiento = null
   if (!o.fecha) o.fecha = null
+  // cuenta_bancaria_id es INTEGER en la BD: '' o undefined -> null; si no, número
+  if (o.cuenta_bancaria_id === '' || o.cuenta_bancaria_id === undefined) o.cuenta_bancaria_id = null
+  else if (o.cuenta_bancaria_id !== null) {
+    const n = parseInt(o.cuenta_bancaria_id, 10)
+    o.cuenta_bancaria_id = isNaN(n) ? null : n
+  }
   return o
 }
 
@@ -44,6 +58,13 @@ export default function Facturas() {
   const [guardando, setGuardando] = useState(false)
   const [aviso, setAviso] = useState(null)
   const [cobroParcial, setCobroParcial] = useState(null) // {factura, importe}
+  const [empresa, setEmpresa] = useState(null)
+
+  useEffect(() => {
+    empresaApi.get().then(setEmpresa).catch(() => {})
+  }, [])
+
+  const cuentasBancarias = (empresa?.cuentas_bancarias && Array.isArray(empresa.cuentas_bancarias)) ? empresa.cuentas_bancarias : []
   const [recordatorio, setRecordatorio] = useState(null)  // factura para recordar cobro
 
   const getCliente = (id) => clientes.items.find(c => c.id === id)
@@ -68,13 +89,16 @@ export default function Facturas() {
       return
     }
     const c = clientes.items[0]
+    const plazo = c.plazo_pago ?? 30
     setDoc({
       cliente_id: c.id,
       fecha: HOY,
-      vencimiento: '',
+      vencimiento: plazo > 0 ? sumarDias(HOY, plazo) : '',
       estado: 'pendiente',
       retencion_irpf: c.retencion_irpf || 0,
       cobrado_parcial: 0,
+      cuenta_bancaria_id: '',
+      notas: '',
       lineas: [{ desc: '', cant: 1, precio: 0, iva: 0.21 }],
     })
     setModoEdicion(false)
@@ -97,6 +121,41 @@ export default function Facturas() {
   function cambiarLinea(i, campo, valor) {
     const lineas = doc.lineas.map((l, idx) => idx === i ? { ...l, [campo]: valor } : l)
     setDoc({ ...doc, lineas })
+  }
+
+  // ─── Líneas más usadas con el cliente seleccionado ───
+  function lineasSugeridas() {
+    if (!doc || !doc.cliente_id) return []
+    const facturasCliente = facturas.items.filter(f => f.cliente_id === doc.cliente_id && f.id !== doc.id)
+    const conteo = {}
+    facturasCliente.forEach(f => {
+      (f.lineas || []).forEach(l => {
+        if (!l.desc || !l.desc.trim()) return
+        const clave = l.desc.trim().toLowerCase()
+        if (!conteo[clave]) {
+          conteo[clave] = { desc: l.desc.trim(), precio: l.precio, iva: l.iva, veces: 0 }
+        }
+        conteo[clave].veces++
+        // Quedarnos con el precio más reciente (última factura)
+        conteo[clave].precio = l.precio
+        conteo[clave].iva = l.iva
+      })
+    })
+    return Object.values(conteo).sort((a, b) => b.veces - a.veces).slice(0, 8)
+  }
+
+  function agregarLineaSugerida(sug) {
+    // Si la primera línea está vacía, la reemplazamos; si no, añadimos
+    const lineaNueva = { desc: sug.desc, cant: 1, precio: sug.precio, iva: sug.iva }
+    const primeraVacia = doc.lineas.length === 1 && !doc.lineas[0].desc && !doc.lineas[0].precio
+    if (primeraVacia) {
+      setDoc({ ...doc, lineas: [lineaNueva] })
+    } else {
+      // Evitar duplicar exactamente la misma descripción
+      const yaEsta = doc.lineas.some(l => (l.desc || '').trim().toLowerCase() === sug.desc.toLowerCase())
+      if (yaEsta) return
+      setDoc({ ...doc, lineas: [...doc.lineas, lineaNueva] })
+    }
   }
 
   // ─── Guardar (con validaciones fiscales) ───
@@ -229,7 +288,9 @@ export default function Facturas() {
   // ─── Ver PDF ───
   function verPDF(f) {
     const cliente = getCliente(f.cliente_id)
-    abrirPDFFactura(f, cliente)
+    const idx = parseInt(f.cuenta_bancaria_id, 10)
+    const cuenta = isNaN(idx) ? null : cuentasBancarias[idx]
+    abrirPDFFactura(f, cliente, { empresa, cuenta })
   }
 
   // ══════════════════ FORMULARIO ══════════════════
@@ -250,7 +311,13 @@ export default function Facturas() {
               <select style={inputStyle} value={doc.cliente_id}
                 onChange={e => {
                   const c = getCliente(e.target.value)
-                  setDoc({ ...doc, cliente_id: e.target.value, retencion_irpf: c?.retencion_irpf ?? doc.retencion_irpf })
+                  const plazo = c?.plazo_pago ?? 30
+                  setDoc({
+                    ...doc,
+                    cliente_id: e.target.value,
+                    retencion_irpf: c?.retencion_irpf ?? doc.retencion_irpf,
+                    vencimiento: plazo > 0 ? sumarDias(doc.fecha || HOY, plazo) : doc.vencimiento,
+                  })
                 }}>
                 {clientes.items.map(c => <option key={c.id} value={c.id}>{c.razon_social}</option>)}
               </select>
@@ -276,10 +343,66 @@ export default function Facturas() {
             </Campo>
           </div>
 
+          {/* Cuenta bancaria de ingreso */}
+          <Campo label="Cuenta para el ingreso (aparece en el PDF)">
+            <select style={inputStyle} value={doc.cuenta_bancaria_id ?? ''}
+              onChange={e => setDoc({ ...doc, cuenta_bancaria_id: e.target.value })}>
+              <option value="">— Sin especificar —</option>
+              {cuentasBancarias.map((cta, i) => (
+                <option key={i} value={i}>
+                  {(cta.alias || cta.banco || 'Cuenta ' + (i + 1))}{cta.iban ? ' · ' + cta.iban : ''}
+                </option>
+              ))}
+            </select>
+            {cuentasBancarias.length === 0 && (
+              <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 4 }}>
+                No tienes cuentas guardadas. Añádelas en Ajustes → Cuentas bancarias.
+              </p>
+            )}
+          </Campo>
+
+          {/* Comentario libre */}
+          <Campo label="Comentario / observaciones (aparece en el PDF)">
+            <textarea style={{ ...inputStyle, minHeight: 70, resize: 'vertical' }} value={doc.notas || ''}
+              onChange={e => setDoc({ ...doc, notas: e.target.value })}
+              placeholder="Ej: Pago a 30 días. Gracias por su confianza." />
+          </Campo>
+
           {/* Líneas */}
           <div style={{ marginTop: 8, marginBottom: 8 }}>
             <label style={{ fontSize: 12, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: 0.3 }}>Líneas de la factura</label>
           </div>
+
+          {/* Sugerencias de productos usados antes con este cliente */}
+          {(() => {
+            const sugerencias = lineasSugeridas()
+            if (sugerencias.length === 0) return null
+            return (
+              <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 10, padding: 12, marginBottom: 12 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#075985', marginBottom: 8 }}>
+                  💡 Productos que sueles facturar a este cliente (pulsa para añadir):
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {sugerencias.map((s, i) => {
+                    const yaEsta = doc.lineas.some(l => (l.desc || '').trim().toLowerCase() === s.desc.toLowerCase())
+                    return (
+                      <button key={i} onClick={() => agregarLineaSugerida(s)} disabled={yaEsta}
+                        style={{
+                          border: '1.5px solid ' + (yaEsta ? '#cbd5e1' : '#0ea5e9'),
+                          background: yaEsta ? '#f1f5f9' : '#fff',
+                          color: yaEsta ? '#94a3b8' : '#0369a1',
+                          borderRadius: 8, padding: '7px 11px', fontSize: 12.5, fontWeight: 600,
+                          cursor: yaEsta ? 'default' : 'pointer', textAlign: 'left',
+                        }}>
+                        {yaEsta ? '✓ ' : '+ '}{s.desc}
+                        <span style={{ color: yaEsta ? '#94a3b8' : '#9ca3af', fontWeight: 400 }}> · {fmt(s.precio)}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })()}
 
           {doc.lineas.map((l, i) => (
             <div key={i} style={{ background: '#f9fafb', borderRadius: 10, padding: 12, marginBottom: 10, border: '1px solid #f0f0f0' }}>
