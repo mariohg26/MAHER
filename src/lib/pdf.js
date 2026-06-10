@@ -32,10 +32,14 @@ function direccionCliente(c) {
   return partes.join(', ')
 }
 
-export function abrirPDFFactura(doc, cliente) {
+export function abrirPDFFactura(doc, cliente, opciones = {}) {
   const totales = calcTotales(doc)
   const dir = direccionCliente(cliente)
   const tipoDoc = doc._tipo || 'FACTURA'
+  const cuenta = opciones.cuenta || null
+  const ibanIngreso = cuenta?.iban || ''
+  const bancoIngreso = cuenta?.banco || cuenta?.alias || ''
+  const comentario = doc.notas || ''
 
   const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
 <title>${tipoDoc} ${doc.id} - ${EMPRESA.nombre}</title>
@@ -137,8 +141,9 @@ tbody tr:last-child td { border-bottom: 2px solid ${ROJO}; }
   <div class="info-pago">
     <div class="info-pago-title">Información de pago</div>
     ${cliente?.forma_pago ? '<div>Forma de pago: ' + cliente.forma_pago + '</div>' : ''}
-    ${cliente?.plazo_pago > 0 ? '<div>Plazo: ' + cliente.plazo_pago + ' días</div>' : ''}
-    ${cliente?.iban ? '<div><strong>IBAN:</strong> ' + cliente.iban + '</div>' : ''}
+    ${doc.vencimiento ? '<div>Vencimiento: ' + fmtDate(doc.vencimiento) + '</div>' : ''}
+    ${ibanIngreso ? '<div style="margin-top:4px"><strong>Ingresar en:</strong></div>' + (bancoIngreso ? '<div>' + bancoIngreso + '</div>' : '') + '<div><strong>IBAN:</strong> ' + ibanIngreso + '</div>' : (cliente?.iban ? '<div><strong>IBAN:</strong> ' + cliente.iban + '</div>' : '')}
+    ${comentario ? '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #f0d0d0"><strong>Observaciones:</strong><br>' + comentario.replace(/\n/g, '<br>') + '</div>' : ''}
   </div>
   <div class="totales">
     <div class="tr"><span>Base imponible</span><span>${fmt(totales.base)}</span></div>
