@@ -10,10 +10,18 @@ const CATEGORIAS = ['Suministros', 'Alquiler', 'Software/Suscripciones', 'Materi
 const fmt = (n) => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(n || 0)
 const fmtDate = (d) => d ? new Date(d + 'T00:00:00').toLocaleDateString('es-ES') : '—'
 
+// Convierte un texto escrito con coma o punto a número (acepta "3,5" y "3.5")
+function numDecimal(texto) {
+  if (texto === '' || texto === null || texto === undefined) return 0
+  const limpio = String(texto).replace(',', '.').replace(/[^\d.-]/g, '')
+  const n = parseFloat(limpio)
+  return isNaN(n) ? 0 : n
+}
+
 function calcTotales(g) {
   const lineas = g.lineas || []
-  const base = lineas.reduce((s, l) => s + (Number(l.cant) || 0) * (Number(l.precio) || 0), 0)
-  const iva = lineas.reduce((s, l) => s + (Number(l.cant) || 0) * (Number(l.precio) || 0) * (Number(l.iva) || 0), 0)
+  const base = lineas.reduce((s, l) => s + numDecimal(l.cant) * numDecimal(l.precio), 0)
+  const iva = lineas.reduce((s, l) => s + numDecimal(l.cant) * numDecimal(l.precio) * (Number(l.iva) || 0), 0)
   const irpf = base * (Number(g.retencion_irpf) || 0)
   return { base, iva, irpf, total: base + iva - irpf }
 }
@@ -88,7 +96,7 @@ export default function Gastos() {
 
   async function guardar() {
     if (!doc.concepto.trim()) { setAviso({ tipo: 'error', texto: 'El concepto es obligatorio' }); return }
-    if (doc.lineas.some(l => !l.precio || l.precio <= 0)) { setAviso({ tipo: 'error', texto: 'Falta el importe en alguna línea' }); return }
+    if (doc.lineas.some(l => numDecimal(l.precio) <= 0)) { setAviso({ tipo: 'error', texto: 'Falta el importe en alguna línea' }); return }
 
     const avisos = []
     if (doc.categoria === 'Alquiler' && (!doc.retencion_irpf || doc.retencion_irpf === 0)) {
@@ -105,6 +113,14 @@ export default function Gastos() {
       const limpio = { ...doc }
       if (!limpio.proveedor_id) limpio.proveedor_id = null
       if (!limpio.fecha) limpio.fecha = null
+      if (Array.isArray(limpio.lineas)) {
+        limpio.lineas = limpio.lineas.map(l => ({
+          ...l,
+          cant: numDecimal(l.cant),
+          precio: numDecimal(l.precio),
+          iva: Number(l.iva) || 0,
+        }))
+      }
 
       if (modoEdicion) {
         const { id, created_at, updated_at, empresa_id, creado_por, ...cambios } = limpio
@@ -193,18 +209,20 @@ export default function Gastos() {
                 onChange={e => cambiarLinea(i, 'desc', e.target.value)} />
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.3fr 1fr auto', gap: 8, alignItems: 'end' }}>
                 <CampoMini label="Cant.">
-                  <input style={inputMini} type="number" step="any" value={l.cant}
-                    onChange={e => cambiarLinea(i, 'cant', parseFloat(e.target.value) || 0)} />
+                  <input style={inputMini} type="text" inputMode="decimal" value={l.cant}
+                    onChange={e => cambiarLinea(i, 'cant', e.target.value)}
+                    onBlur={e => cambiarLinea(i, 'cant', numDecimal(e.target.value))} />
                 </CampoMini>
                 <CampoMini label="Importe €">
-                  <input style={inputMini} type="number" step="any" value={l.precio}
-                    onChange={e => cambiarLinea(i, 'precio', parseFloat(e.target.value) || 0)} />
+                  <input style={inputMini} type="text" inputMode="decimal" value={l.precio}
+                    onChange={e => cambiarLinea(i, 'precio', e.target.value)}
+                    onBlur={e => cambiarLinea(i, 'precio', numDecimal(e.target.value))} />
                 </CampoMini>
                 <CampoMini label="IVA">
-                  <select style={inputMini} value={l.iva}
+                  <select style={inputMini} value={String(l.iva)}
                     onChange={e => cambiarLinea(i, 'iva', parseFloat(e.target.value))}>
                     <option value="0.21">21%</option>
-                    <option value="0.10">10%</option>
+                    <option value="0.1">10%</option>
                     <option value="0.04">4%</option>
                     <option value="0">0%</option>
                   </select>
@@ -213,7 +231,7 @@ export default function Gastos() {
                   style={{ padding: '9px 12px', borderRadius: 8, border: '1.5px solid #fecaca', background: '#fef2f2', color: '#991b1b', fontWeight: 700, cursor: 'pointer', fontSize: 13, opacity: doc.lineas.length === 1 ? 0.4 : 1 }}>✕</button>
               </div>
               <div style={{ textAlign: 'right', fontSize: 12, color: '#6b7280', marginTop: 6 }}>
-                Subtotal: <strong>{fmt((l.cant || 0) * (l.precio || 0))}</strong>
+                Subtotal: <strong>{fmt(numDecimal(l.cant) * numDecimal(l.precio))}</strong>
               </div>
             </div>
           ))}
