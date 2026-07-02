@@ -18,10 +18,18 @@ function sumarDias(fechaStr, dias) {
 const fmt = (n) => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(n || 0)
 const fmtDate = (d) => d ? new Date(d + 'T00:00:00').toLocaleDateString('es-ES') : '—'
 
+// Convierte un texto escrito con coma o punto a número (acepta "3,5" y "3.5")
+function numDecimal(texto) {
+  if (texto === '' || texto === null || texto === undefined) return 0
+  const limpio = String(texto).replace(',', '.').replace(/[^\d.-]/g, '')
+  const n = parseFloat(limpio)
+  return isNaN(n) ? 0 : n
+}
+
 function calcTotales(doc) {
   const lineas = doc.lineas || []
-  const base = lineas.reduce((s, l) => s + (Number(l.cant) || 0) * (Number(l.precio) || 0), 0)
-  const iva = lineas.reduce((s, l) => s + (Number(l.cant) || 0) * (Number(l.precio) || 0) * (Number(l.iva) || 0), 0)
+  const base = lineas.reduce((s, l) => s + numDecimal(l.cant) * numDecimal(l.precio), 0)
+  const iva = lineas.reduce((s, l) => s + numDecimal(l.cant) * numDecimal(l.precio) * (Number(l.iva) || 0), 0)
   const irpf = base * (Number(doc.retencion_irpf) || 0)
   return { base, iva, irpf, total: base + iva - irpf }
 }
@@ -38,6 +46,15 @@ function limpiarFechas(obj) {
   else if (o.cuenta_bancaria_id !== null) {
     const n = parseInt(o.cuenta_bancaria_id, 10)
     o.cuenta_bancaria_id = isNaN(n) ? null : n
+  }
+  // Normalizar las líneas: cant y precio a número de verdad (por si se escribieron con coma)
+  if (Array.isArray(o.lineas)) {
+    o.lineas = o.lineas.map(l => ({
+      ...l,
+      cant: numDecimal(l.cant),
+      precio: numDecimal(l.precio),
+      iva: Number(l.iva) || 0,
+    }))
   }
   return o
 }
@@ -162,7 +179,7 @@ export default function Facturas() {
   async function guardar() {
     if (!doc.cliente_id) { setAviso({ tipo: 'error', texto: 'Selecciona un cliente' }); return }
     if (doc.lineas.some(l => !l.desc || !l.desc.trim())) { setAviso({ tipo: 'error', texto: 'Falta la descripción en alguna línea' }); return }
-    if (doc.lineas.some(l => !l.precio || l.precio <= 0)) { setAviso({ tipo: 'error', texto: 'Falta el precio en alguna línea (o es 0)' }); return }
+    if (doc.lineas.some(l => numDecimal(l.precio) <= 0)) { setAviso({ tipo: 'error', texto: 'Falta el precio en alguna línea (o es 0)' }); return }
 
     const cliente = getCliente(doc.cliente_id)
     const totales = calcTotales(doc)
@@ -411,18 +428,20 @@ export default function Facturas() {
                 onChange={e => cambiarLinea(i, 'desc', e.target.value)} />
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.3fr 1fr auto', gap: 8, alignItems: 'end' }}>
                 <CampoMini label="Cant.">
-                  <input style={inputMini} type="number" step="any" value={l.cant}
-                    onChange={e => cambiarLinea(i, 'cant', parseFloat(e.target.value) || 0)} />
+                  <input style={inputMini} type="text" inputMode="decimal" value={l.cant}
+                    onChange={e => cambiarLinea(i, 'cant', e.target.value)}
+                    onBlur={e => cambiarLinea(i, 'cant', numDecimal(e.target.value))} />
                 </CampoMini>
                 <CampoMini label="Precio €">
-                  <input style={inputMini} type="number" step="any" value={l.precio}
-                    onChange={e => cambiarLinea(i, 'precio', parseFloat(e.target.value) || 0)} />
+                  <input style={inputMini} type="text" inputMode="decimal" value={l.precio}
+                    onChange={e => cambiarLinea(i, 'precio', e.target.value)}
+                    onBlur={e => cambiarLinea(i, 'precio', numDecimal(e.target.value))} />
                 </CampoMini>
                 <CampoMini label="IVA">
-                  <select style={inputMini} value={l.iva}
+                  <select style={inputMini} value={String(l.iva)}
                     onChange={e => cambiarLinea(i, 'iva', parseFloat(e.target.value))}>
                     <option value="0.21">21%</option>
-                    <option value="0.10">10%</option>
+                    <option value="0.1">10%</option>
                     <option value="0.04">4%</option>
                     <option value="0">0%</option>
                   </select>
@@ -433,7 +452,7 @@ export default function Facturas() {
                 </button>
               </div>
               <div style={{ textAlign: 'right', fontSize: 12, color: '#6b7280', marginTop: 6 }}>
-                Subtotal línea: <strong>{fmt((l.cant || 0) * (l.precio || 0))}</strong>
+                Subtotal línea: <strong>{fmt(numDecimal(l.cant) * numDecimal(l.precio))}</strong>
               </div>
             </div>
           ))}
