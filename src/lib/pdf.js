@@ -323,9 +323,21 @@ export async function compartirPDFFactura(doc, cliente, opciones = {}) {
   return 'descargado'
 }
 
-// ─── Ver el PDF en una pestaña nueva ───
-// (se abre la pestaña antes de generar el PDF para que el navegador no la bloquee)
+// ─── Ver el PDF ───
+// Dentro de la app (visor propio), para no salir a otra pestaña: en el móvil
+// eso hace que Android cierre MAHER y al volver empiece de cero.
 export async function abrirPDFFactura(doc, cliente, opciones = {}) {
+  if (window.__maherVisorListo) {
+    try {
+      const blob = await generarPDFFactura(doc, cliente, opciones)
+      window.dispatchEvent(new CustomEvent('maher-ver-pdf', { detail: { blob, nombre: nombreArchivoPDF(doc, cliente) } }))
+    } catch (e) {
+      alert('No se pudo generar el PDF: ' + (e.message || e))
+    }
+    return
+  }
+  // Por si el visor no está montado: pestaña nueva
+  // (se abre antes de generar el PDF para que el navegador no la bloquee)
   const ventana = window.open('', '_blank')
   if (ventana) {
     try { ventana.document.write('<p style="font-family:sans-serif;padding:24px;color:#6b7280">Preparando el PDF…</p>') } catch (e) {}
@@ -335,7 +347,6 @@ export async function abrirPDFFactura(doc, cliente, opciones = {}) {
     const url = URL.createObjectURL(blob)
     if (ventana) ventana.location.href = url
     else {
-      // Ventanas emergentes bloqueadas: lo descargamos
       const a = document.createElement('a')
       a.href = url; a.download = nombreArchivoPDF(doc, cliente)
       document.body.appendChild(a); a.click(); a.remove()

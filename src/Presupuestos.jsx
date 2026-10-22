@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useColeccion } from './hooks/useColeccion'
+import { leerRecordado, useRecordar } from './hooks/useRecordar'
 import { presupuestosApi, facturasApi, clientesApi, miEmpresaId, siguienteNumeroFactura, empresaApi } from './lib/api'
 import { abrirPDFFactura, descargarPDFFactura, compartirPDFFactura, puedeCompartirArchivos } from './lib/pdf'
 
@@ -28,8 +29,11 @@ export default function Presupuestos() {
   const presupuestos = useColeccion(presupuestosApi)
   const facturas = useColeccion(facturasApi)
   const clientes = useColeccion(clientesApi)
-  const [doc, setDoc] = useState(null)
-  const [modoEdicion, setModoEdicion] = useState(false)
+  // Formulario a medias: se recupera si Android cerró la app mientras estabas fuera
+  const borrador = leerRecordado('borrador_presupuesto')
+  const [doc, setDoc] = useState(borrador?.doc || null)        // en edición (null = lista)
+  const [modoEdicion, setModoEdicion] = useState(!!borrador?.modoEdicion)
+  useRecordar('borrador_presupuesto', doc ? { doc, modoEdicion } : null, { olvidarAlSalir: true })
   const [filtro, setFiltro] = useState('todos')
   const [busqueda, setBusqueda] = useState('')
   const [guardando, setGuardando] = useState(false)

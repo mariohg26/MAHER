@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useColeccion } from './hooks/useColeccion'
+import { leerRecordado, useRecordar } from './hooks/useRecordar'
 import { proveedoresApi, miEmpresaId } from './lib/api'
 
 const ROJO = '#c81019'
@@ -25,7 +26,8 @@ const PROVEEDOR_VACIO = {
 
 export default function Proveedores() {
   const proveedores = useColeccion(proveedoresApi)
-  const [editando, setEditando] = useState(null)
+  const [editando, setEditando] = useState(() => leerRecordado('borrador_proveedor')) // null = nadie; objeto = formulario abierto
+  useRecordar('borrador_proveedor', editando, { olvidarAlSalir: true })
   const [busqueda, setBusqueda] = useState('')
   const [guardando, setGuardando] = useState(false)
   const [aviso, setAviso] = useState(null)

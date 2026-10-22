@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useColeccion } from './hooks/useColeccion'
+import { leerRecordado, useRecordar } from './hooks/useRecordar'
 import { gastosApi, proveedoresApi, miEmpresaId, subirAdjunto } from './lib/api'
 
 const ROJO = '#c81019'
@@ -26,6 +27,29 @@ function calcTotales(g) {
   return { base, iva, irpf, total: base + iva - irpf }
 }
 
+// Misma fecha el mes siguiente (31 de enero → 28/29 de febrero)
+function mesSiguiente(fecha) {
+  const [a, m, d] = String(fecha || HOY).slice(0, 10).split('-').map(Number)
+  if (!a || !m || !d) return HOY
+  const ultimoDia = new Date(a, m + 1, 0).getDate()
+  const dest = new Date(a, m, Math.min(d, ultimoDia))
+  return `${dest.getFullYear()}-${String(dest.getMonth() + 1).padStart(2, '0')}-${String(dest.getDate()).padStart(2, '0')}`
+}
+
+// "Alquiler agosto" → "Alquiler septiembre" (respeta mayúsculas)
+const NOMBRES_MES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
+function siguienteMesEnTexto(texto) {
+  return String(texto).replace(/\b(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\b(\s+(?:de\s+)?)?(\d{4})?/gi, (_, mes, sep, anio) => {
+    const i = NOMBRES_MES.indexOf(mes.toLowerCase().replace('setiembre', 'septiembre'))
+    let sig = NOMBRES_MES[(i + 1) % 12]
+    if (mes === mes.toUpperCase()) sig = sig.toUpperCase()
+    else if (mes[0] === mes[0].toUpperCase()) sig = sig[0].toUpperCase() + sig.slice(1)
+    // De diciembre a enero, el año también avanza ("Diciembre 2026" → "Enero 2027")
+    const nuevoAnio = anio ? (i === 11 ? String(Number(anio) + 1) : anio) : ''
+    return sig + (sep || '') + nuevoAnio
+  })
+}
+
 const GASTO_VACIO = {
   concepto: '',
   proveedor_id: '',
@@ -41,8 +65,11 @@ const GASTO_VACIO = {
 export default function Gastos({ abrirNuevo, onNuevoAbierto }) {
   const gastos = useColeccion(gastosApi)
   const proveedores = useColeccion(proveedoresApi)
-  const [doc, setDoc] = useState(null)
-  const [modoEdicion, setModoEdicion] = useState(false)
+  // Formulario a medias: se recupera si Android cerró la app mientras estabas fuera
+  const borrador = leerRecordado('borrador_gasto')
+  const [doc, setDoc] = useState(borrador?.doc || null)        // en edición (null = lista)
+  const [modoEdicion, setModoEdicion] = useState(!!borrador?.modoEdicion)
+  useRecordar('borrador_gasto', doc ? { doc, modoEdicion } : null, { olvidarAlSalir: true })
   const [busqueda, setBusqueda] = useState('')
   const [filtroCat, setFiltroCat] = useState('todas')
   const [guardando, setGuardando] = useState(false)
@@ -69,6 +96,24 @@ export default function Gastos({ abrirNuevo, onNuevoAbierto }) {
       onNuevoAbierto && onNuevoAbierto()
     }
   }, [abrirNuevo])
+
+  // Duplicar: abre un gasto nuevo igual que este, con la fecha un mes después.
+  // Ideal para el alquiler de cada mes. Si el concepto dice el mes ("Alquiler agosto"),
+  // se cambia por el siguiente. Se guarda solo cuando tú pulses Guardar.
+  function duplicar(g) {
+    const { id, created_at, updated_at, empresa_id, creado_por, adjunto_url, ...resto } = g
+    setDoc({
+      ...GASTO_VACIO,
+      ...resto,
+      fecha: mesSiguiente(g.fecha),
+      concepto: siguienteMesEnTexto(g.concepto || ''),
+      adjunto_url: '',
+      lineas: (g.lineas || []).map(l => ({ ...l, desc: siguienteMesEnTexto(l.desc || '') })),
+    })
+    setModoEdicion(false)
+    setAviso({ tipo: 'ok', texto: 'Copia lista: revisa la fecha y el importe y pulsa Guardar.' })
+    window.scrollTo(0, 0)
+  }
 
   function editar(g) { setDoc({ ...g, lineas: (g.lineas || []).map(l => ({ ...l })) }); setModoEdicion(true); setAviso(null) }
 
@@ -370,6 +415,7 @@ export default function Gastos({ abrirNuevo, onNuevoAbierto }) {
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 12, paddingTop: 12, borderTop: '1px solid #f3f4f6' }}>
                   {g.adjunto_url && <Btn onClick={() => window.open(g.adjunto_url, '_blank')} bg="#eff6ff" col="#1e40af">📎 Ver adjunto</Btn>}
                   <Btn onClick={() => editar(g)} bg="#f9fafb" col="#374151">✏️ Editar</Btn>
+                  <Btn onClick={() => duplicar(g)} bg="#ede9fe" col="#5b21b6">📋 Duplicar</Btn>
                   <Btn onClick={() => eliminar(g)} bg="#fef2f2" col="#991b1b">🗑️ Eliminar</Btn>
                 </div>
               </div>

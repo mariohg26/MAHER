@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useColeccion } from './hooks/useColeccion'
 import { facturasApi, gastosApi, clientesApi, presupuestosApi } from './lib/api'
+import { calendarioFiscal, esAlquiler } from './lib/fiscal'
 
 const ROJO = '#c81019'
 
@@ -139,14 +140,12 @@ export default function Dashboard({ usuario, onNavegar, onNuevo, verCifras = tru
     })
   }
   // Vencimiento fiscal próximo (15 días)
-  const fechasFiscales = [
-    { fecha: `${anoActual}-04-20`, label: 'Modelo 303/130 1T' },
-    { fecha: `${anoActual}-07-20`, label: 'Modelo 303/130 2T' },
-    { fecha: `${anoActual}-10-20`, label: 'Modelo 303/130 3T' },
-    { fecha: `${anoActual + 1}-01-30`, label: 'Modelo 303/130 4T' },
-    { fecha: `${anoActual + 1}-01-30`, label: 'Modelo 390' },
-    { fecha: `${anoActual + 1}-02-28`, label: 'Modelo 347' },
-  ]
+  // Calendario fiscal de una SL (303, 202, 390, 347, 200…), sin el 130 de autónomos
+  const conRetencion = gastos.filter(g => (Number(g.retencion_irpf) || 0) > 0)
+  const fechasFiscales = calendarioFiscal(anoActual, { con115: conRetencion.some(esAlquiler), con111: conRetencion.some(g => !esAlquiler(g)) }).map(c => ({
+    fecha: `${c.fecha.getFullYear()}-${String(c.fecha.getMonth() + 1).padStart(2, '0')}-${String(c.fecha.getDate()).padStart(2, '0')}`,
+    label: c.label,
+  }))
   const proximos = fechasFiscales.filter(f => {
     const d = new Date(f.fecha + 'T00:00:00')
     const diff = (d - HOY_D) / 86400000

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useColeccion } from './hooks/useColeccion'
+import { leerRecordado, useRecordar } from './hooks/useRecordar'
 import { facturasApi, clientesApi, miEmpresaId, siguienteNumeroFactura, empresaApi } from './lib/api'
 import { abrirPDFFactura, descargarPDFFactura, compartirPDFFactura, puedeCompartirArchivos } from './lib/pdf'
 
@@ -68,8 +69,11 @@ const ESTADOS = {
 export default function Facturas({ abrirNuevo, onNuevoAbierto }) {
   const facturas = useColeccion(facturasApi)
   const clientes = useColeccion(clientesApi)
-  const [doc, setDoc] = useState(null)        // factura en edición (null = lista)
-  const [modoEdicion, setModoEdicion] = useState(false)
+  // Formulario a medias: se recupera si Android cerró la app mientras estabas fuera
+  const borrador = leerRecordado('borrador_factura')
+  const [doc, setDoc] = useState(borrador?.doc || null)        // en edición (null = lista)
+  const [modoEdicion, setModoEdicion] = useState(!!borrador?.modoEdicion)
+  useRecordar('borrador_factura', doc ? { doc, modoEdicion } : null, { olvidarAlSalir: true })
   const [filtro, setFiltro] = useState('todas')
   const [busqueda, setBusqueda] = useState('')
   const [guardando, setGuardando] = useState(false)
@@ -82,7 +86,8 @@ export default function Facturas({ abrirNuevo, onNuevoAbierto }) {
   }, [])
 
   const cuentasBancarias = (empresa?.cuentas_bancarias && Array.isArray(empresa.cuentas_bancarias)) ? empresa.cuentas_bancarias : []
-  const [recordatorio, setRecordatorio] = useState(null)  // factura para recordar cobro
+  const [recordatorio, setRecordatorio] = useState(() => leerRecordado('recordatorio_cobro'))  // factura para recordar cobro
+  useRecordar('recordatorio_cobro', recordatorio, { olvidarAlSalir: true })
 
   const getCliente = (id) => clientes.items.find(c => c.id === id)
 

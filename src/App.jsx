@@ -15,6 +15,8 @@ import Ajustes from './Ajustes'
 import Dashboard from './Dashboard'
 import Gastos from './Gastos'
 import { SECCIONES, permisosDe, NOMBRE_ROL } from './lib/permisos'
+import { leerRecordado, useRecordar } from './hooks/useRecordar'
+import VisorPDF from './VisorPDF'
 
 const ROJO = '#c81019'
 
@@ -40,7 +42,9 @@ export default function App() {
 }
 
 function AppContent({ usuario, onLogout }) {
-  const [seccion, setSeccion] = useState('inicio')
+  // Si Android cerró la app mientras estabas fuera, volvemos a la misma pestaña
+  const [seccion, setSeccion] = useState(() => leerRecordado('seccion') || 'inicio')
+  useRecordar('seccion', seccion)
   // Sección que debe abrir directamente su formulario de "nuevo" (botones rápidos del inicio)
   const [abrirNuevo, setAbrirNuevo] = useState(null)
 
@@ -102,6 +106,8 @@ function AppContent({ usuario, onLogout }) {
         {seccionVisible === 'informes' && <Informes />}
         {seccionVisible === 'ajustes' && <Ajustes usuario={usuario} />}
       </div>
+
+      <VisorPDF />
     </div>
   )
 }
