@@ -7,7 +7,7 @@ const EMPRESA = { nombre: 'QUESOS MAHER SL', nif: 'B37267259' }
 const ANO_ACTUAL = new Date().getFullYear()
 const TRIM_ACTUAL = Math.floor(new Date().getMonth() / 3) + 1
 
-const fmt = (n) => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(n || 0)
+const fmt = (n) => (Number(n) || 0).toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ' €'
 const fmtDate = (d) => d ? new Date(d + 'T00:00:00').toLocaleDateString('es-ES') : '—'
 
 function calcTotales(doc) {

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useColeccion } from './hooks/useColeccion'
 import {
   empresaApi, usuariosApi, facturasApi, presupuestosApi,
-  gastosApi, clientesApi, proveedoresApi, miEmpresaId, crearUsuario, actualizarUsuario,
+  gastosApi, clientesApi, proveedoresApi, miEmpresaId, crearUsuario, actualizarUsuario, cambiarPasswordUsuario,
 } from './lib/api'
 
 const ROJO = '#c81019'
@@ -420,12 +420,28 @@ function Backup() {
 }
 
 // ══════════════════ USUARIOS ══════════════════
+export const ROLES = [
+  { id: 'admin', label: 'Administrador', desc: 'Todo, incluidos Ajustes y usuarios', bg: '#ede9fe', col: '#5b21b6' },
+  { id: 'contable', label: 'Contable', desc: 'Todo menos Ajustes y usuarios', bg: '#dbeafe', col: '#1e40af' },
+  { id: 'comercial', label: 'Empleado', desc: 'Facturas, presupuestos, gastos y clientes. No ve informes ni las cifras del inicio', bg: '#dcfce7', col: '#166534' },
+  { id: 'lectura', label: 'Solo consulta', desc: 'Puede mirar, pero no crear ni cambiar nada', bg: '#f1f5f9', col: '#475569' },
+]
+const rolInfo = (id) => ROLES.find(r => r.id === id) || { id, label: id, desc: '', bg: '#f1f5f9', col: '#475569' }
+
+// Contraseña fácil de dictar: palabra + 4 cifras (ej. Curado4821)
+function generarPassword() {
+  const palabras = ['Curado', 'Oveja', 'Cabra', 'Tierno', 'Cuna', 'Bodega', 'Pieza', 'Corteza', 'Cava', 'Molde']
+  const p = palabras[Math.floor(Math.random() * palabras.length)]
+  return p + String(Math.floor(1000 + Math.random() * 9000))
+}
+
 function Usuarios({ usuario }) {
   const usuarios = useColeccion(usuariosApi)
   const [form, setForm] = useState(null)         // crear nuevo
   const [editando, setEditando] = useState(null) // editar existente
   const [creando, setCreando] = useState(false)
   const [aviso, setAviso] = useState(null)
+  const [accesos, setAccesos] = useState(null)   // datos de acceso para enviar al usuario
   const esAdmin = usuario?.rol === 'admin'
 
   async function crear() {
@@ -433,56 +449,73 @@ function Usuarios({ usuario }) {
     if (form.password.length < 6) { setAviso({ tipo: 'error', texto: 'La contraseña debe tener al menos 6 caracteres' }); return }
     setCreando(true); setAviso(null)
     try {
-      const empresaId = await miEmpresaId()
-      await crearUsuario({ email: form.email.trim(), password: form.password, nombre: form.nombre.trim(), rol: form.rol, empresaId })
-      setAviso({ tipo: 'ok', texto: 'Usuario creado. Ya puede entrar con su email y contraseña.' })
+      await crearUsuario({ email: form.email.trim(), password: form.password, nombre: form.nombre.trim(), rol: form.rol })
+      setAccesos({ nombre: form.nombre.trim(), email: form.email.trim().toLowerCase(), password: form.password, rol: form.rol })
       setForm(null); usuarios.recargar()
     } catch (e) {
-      const msg = (e.message || '').includes('already registered') ? 'Ese email ya está registrado.' : 'Error: ' + (e.message || e)
-      setAviso({ tipo: 'error', texto: msg })
+      setAviso({ tipo: 'error', texto: e.message || String(e) })
     } finally { setCreando(false) }
   }
 
   async function guardarEdicion() {
     if (!editando.nombre.trim()) { setAviso({ tipo: 'error', texto: 'El nombre no puede estar vacío' }); return }
+    if (editando.password && editando.password.length < 6) { setAviso({ tipo: 'error', texto: 'La contraseña nueva debe tener al menos 6 caracteres' }); return }
     setCreando(true); setAviso(null)
     try {
       await actualizarUsuario(editando.id, { nombre: editando.nombre.trim(), rol: editando.rol, activo: editando.activo })
-      setAviso({ tipo: 'ok', texto: 'Usuario actualizado' })
+      if (editando.password) {
+        await cambiarPasswordUsuario(editando.id, editando.password)
+        setAccesos({ nombre: editando.nombre.trim(), email: editando.email, password: editando.password, rol: editando.rol, cambio: true })
+      } else {
+        setAviso({ tipo: 'ok', texto: 'Usuario actualizado' })
+      }
       setEditando(null); usuarios.recargar()
     } catch (e) {
-      setAviso({ tipo: 'error', texto: 'Error: ' + (e.message || e) })
+      setAviso({ tipo: 'error', texto: e.message || String(e) })
     } finally { setCreando(false) }
   }
+
+  const selectorRol = (valor, onChange, deshabilitado) => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {ROLES.map(r => (
+        <label key={r.id} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: 10, borderRadius: 10, cursor: deshabilitado ? 'default' : 'pointer', border: '1.5px solid ' + (valor === r.id ? ROJO : '#e5e7eb'), background: valor === r.id ? '#fef2f2' : '#fff', opacity: deshabilitado && valor !== r.id ? 0.5 : 1 }}>
+          <input type="radio" checked={valor === r.id} disabled={deshabilitado} onChange={() => onChange(r.id)} style={{ marginTop: 2, accentColor: ROJO }} />
+          <span>
+            <span style={{ fontWeight: 800, fontSize: 14 }}>{r.label}</span>
+            <span style={{ display: 'block', fontSize: 12, color: '#6b7280' }}>{r.desc}</span>
+          </span>
+        </label>
+      ))}
+    </div>
+  )
 
   return (
     <Tarjeta>
       {aviso && <Aviso aviso={aviso} />}
+      {accesos && <DatosAcceso datos={accesos} onCerrar={() => setAccesos(null)} />}
+
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
         <h3 style={{ fontSize: 16, fontWeight: 800, margin: 0 }}>Usuarios de la empresa</h3>
         {esAdmin && !form && !editando && (
-          <button onClick={() => setForm({ nombre: '', email: '', password: '', rol: 'empleado' })} style={btnMini}>+ Nuevo usuario</button>
+          <button onClick={() => { setAccesos(null); setAviso(null); setForm({ nombre: '', email: '', password: generarPassword(), rol: 'comercial' }) }} style={btnMini}>+ Nuevo usuario</button>
         )}
       </div>
       {!esAdmin && <p style={{ fontSize: 13, color: '#9ca3af', marginBottom: 12 }}>Solo los administradores pueden crear o editar usuarios.</p>}
-
-      <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 12.5, color: '#92400e', lineHeight: 1.5 }}>
-        ℹ️ Al crear un usuario, podrá entrar con el email y la contraseña que le pongas. Si no puede entrar, revisa el ajuste de confirmación de email en Supabase (te lo explico en el chat).
-      </div>
 
       {/* Formulario crear */}
       {form && (
         <div style={{ background: '#f9fafb', borderRadius: 12, padding: 16, marginBottom: 16, border: '1px solid #f0f0f0' }}>
           <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 12 }}>Nuevo usuario</div>
-          <Campo label="Nombre"><input style={inp} value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} /></Campo>
-          <Campo label="Email"><input style={inp} type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></Campo>
-          <Campo label="Contraseña (mínimo 6 caracteres)"><input style={inp} type="text" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} /></Campo>
-          <Campo label="Rol">
-            <select style={inp} value={form.rol} onChange={e => setForm({ ...form, rol: e.target.value })}>
-              <option value="empleado">Empleado</option><option value="admin">Administrador</option>
-            </select>
+          <Campo label="Nombre"><input style={inp} value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} placeholder="Ej. Laura" /></Campo>
+          <Campo label="Email (con él entrará en la app)"><input style={inp} type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="laura@ejemplo.com" /></Campo>
+          <Campo label="Contraseña">
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input style={{ ...inp, flex: 1 }} type="text" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} />
+              <button type="button" onClick={() => setForm({ ...form, password: generarPassword() })} style={{ ...btnMini, whiteSpace: 'nowrap' }}>🎲 Otra</button>
+            </div>
           </Campo>
-          <div style={{ display: 'flex', gap: 10 }}>
+          <Campo label="¿Qué puede hacer?">{selectorRol(form.rol, rol => setForm({ ...form, rol }))}</Campo>
+          <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
             <button onClick={() => setForm(null)} disabled={creando} style={{ flex: 1, padding: 12, borderRadius: 10, border: '1.5px solid #e5e7eb', background: '#fff', fontWeight: 700, cursor: 'pointer' }}>Cancelar</button>
             <button onClick={crear} disabled={creando} style={{ flex: 2, padding: 12, borderRadius: 10, border: 'none', background: ROJO, color: '#fff', fontWeight: 800, cursor: 'pointer', opacity: creando ? 0.6 : 1 }}>{creando ? 'Creando…' : 'Crear usuario'}</button>
           </div>
@@ -495,13 +528,16 @@ function Usuarios({ usuario }) {
           <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 12 }}>Editar usuario</div>
           <Campo label="Nombre"><input style={inp} value={editando.nombre} onChange={e => setEditando({ ...editando, nombre: e.target.value })} /></Campo>
           <Campo label="Email (no se puede cambiar)"><input style={{ ...inp, background: '#f3f4f6', color: '#9ca3af' }} value={editando.email} disabled /></Campo>
-          <Campo label="Rol">
-            <select style={inp} value={editando.rol} onChange={e => setEditando({ ...editando, rol: e.target.value })} disabled={editando.id === usuario?.id}>
-              <option value="empleado">Empleado</option><option value="admin">Administrador</option>
-            </select>
+          <Campo label="Contraseña nueva (déjalo vacío para no cambiarla)">
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input style={{ ...inp, flex: 1 }} type="text" value={editando.password} onChange={e => setEditando({ ...editando, password: e.target.value })} placeholder="Sin cambios" />
+              <button type="button" onClick={() => setEditando({ ...editando, password: generarPassword() })} style={{ ...btnMini, whiteSpace: 'nowrap' }}>🎲 Generar</button>
+            </div>
           </Campo>
-          <Toggle label="Usuario activo (puede entrar)" checked={editando.activo} onChange={v => setEditando({ ...editando, activo: v })} />
-          {editando.id === usuario?.id && <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 12 }}>No puedes cambiar tu propio rol.</p>}
+          <Campo label="¿Qué puede hacer?">{selectorRol(editando.rol, rol => setEditando({ ...editando, rol }), editando.id === usuario?.id)}</Campo>
+          {editando.id === usuario?.id
+            ? <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 12 }}>No puedes cambiar tu propio rol ni desactivarte a ti mismo.</p>
+            : <Toggle label="Usuario activo (puede entrar)" checked={editando.activo} onChange={v => setEditando({ ...editando, activo: v })} />}
           <div style={{ display: 'flex', gap: 10 }}>
             <button onClick={() => setEditando(null)} disabled={creando} style={{ flex: 1, padding: 12, borderRadius: 10, border: '1.5px solid #e5e7eb', background: '#fff', fontWeight: 700, cursor: 'pointer' }}>Cancelar</button>
             <button onClick={guardarEdicion} disabled={creando} style={{ flex: 2, padding: 12, borderRadius: 10, border: 'none', background: ROJO, color: '#fff', fontWeight: 800, cursor: 'pointer', opacity: creando ? 0.6 : 1 }}>{creando ? 'Guardando…' : 'Guardar cambios'}</button>
@@ -514,27 +550,57 @@ function Usuarios({ usuario }) {
         <div style={{ textAlign: 'center', padding: 20, color: '#9ca3af' }}>Cargando…</div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {usuarios.items.map(u => (
-            <div key={u.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 12, background: '#f9fafb', borderRadius: 10, opacity: u.activo === false ? 0.5 : 1 }}>
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontWeight: 700, fontSize: 14 }}>{u.nombre} {u.id === usuario?.id && <span style={{ color: '#9ca3af', fontWeight: 500 }}>(tú)</span>}</div>
-                <div style={{ fontSize: 12, color: '#9ca3af' }}>{u.email}</div>
-                {u.activo === false && <div style={{ fontSize: 11, color: '#991b1b', fontWeight: 700 }}>Desactivado</div>}
+          {usuarios.items.map(u => {
+            const r = rolInfo(u.rol)
+            return (
+              <div key={u.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: 12, background: '#f9fafb', borderRadius: 10, opacity: u.activo === false ? 0.5 : 1 }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>{u.nombre} {u.id === usuario?.id && <span style={{ color: '#9ca3af', fontWeight: 500 }}>(tú)</span>}</div>
+                  <div style={{ fontSize: 12, color: '#9ca3af', overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.email}</div>
+                  {u.activo === false && <div style={{ fontSize: 11, color: '#991b1b', fontWeight: 700 }}>Desactivado</div>}
+                  {u.activo !== false && !u.last_login && u.id !== usuario?.id && <div style={{ fontSize: 11, color: '#92400e', fontWeight: 700 }}>Todavía no ha entrado nunca</div>}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                  <span style={{ background: r.bg, color: r.col, fontSize: 11, fontWeight: 800, padding: '4px 10px', borderRadius: 20 }}>{r.label}</span>
+                  {esAdmin && (
+                    <button onClick={() => { setAccesos(null); setAviso(null); setEditando({ id: u.id, nombre: u.nombre, email: u.email, rol: u.rol, activo: u.activo !== false, password: '' }) }}
+                      style={{ border: 'none', background: '#eff6ff', color: '#1e40af', borderRadius: 8, padding: '6px 10px', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>✏️ Editar</button>
+                  )}
+                </div>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ background: u.rol === 'admin' ? '#ede9fe' : '#f1f5f9', color: u.rol === 'admin' ? '#5b21b6' : '#475569', fontSize: 11, fontWeight: 800, padding: '4px 10px', borderRadius: 20 }}>
-                  {u.rol === 'admin' ? 'Administrador' : 'Empleado'}
-                </span>
-                {esAdmin && (
-                  <button onClick={() => setEditando({ id: u.id, nombre: u.nombre, email: u.email, rol: u.rol, activo: u.activo !== false })}
-                    style={{ border: 'none', background: '#eff6ff', color: '#1e40af', borderRadius: 8, padding: '6px 10px', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>✏️ Editar</button>
-                )}
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </Tarjeta>
+  )
+}
+
+// Tarjeta con los datos de acceso, para copiarlos o mandarlos por WhatsApp
+function DatosAcceso({ datos, onCerrar }) {
+  const [copiado, setCopiado] = useState(false)
+  const url = typeof window !== 'undefined' ? window.location.origin : ''
+  const texto = `Hola ${datos.nombre}, ${datos.cambio ? 'te he cambiado la contraseña de' : 'ya tienes acceso a'} la app de Quesos Maher.\n\nEntra en: ${url}\nEmail: ${datos.email}\nContraseña: ${datos.password}`
+  async function copiar() {
+    try { await navigator.clipboard.writeText(texto); setCopiado(true); setTimeout(() => setCopiado(false), 2000) } catch (e) {}
+  }
+  return (
+    <div style={{ background: '#f0fdf4', border: '1.5px solid #86efac', borderRadius: 12, padding: 14, marginBottom: 16 }}>
+      <div style={{ fontSize: 14, fontWeight: 800, color: '#065f46', marginBottom: 8 }}>
+        ✅ {datos.cambio ? 'Contraseña cambiada' : `${datos.nombre} ya puede entrar`} · {rolInfo(datos.rol).label}
+      </div>
+      <div style={{ fontSize: 13, color: '#065f46', lineHeight: 1.7, background: '#fff', borderRadius: 8, padding: 10, fontFamily: 'ui-monospace, Menlo, monospace' }}>
+        <div>Email: <b>{datos.email}</b></div>
+        <div>Contraseña: <b>{datos.password}</b></div>
+      </div>
+      <div style={{ fontSize: 12, color: '#065f46', margin: '8px 0 10px' }}>Apúntala ahora: por seguridad no se vuelve a mostrar.</div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <button onClick={copiar} style={{ ...btnMini, background: '#fff', color: '#065f46', border: '1.5px solid #86efac' }}>{copiado ? '✓ Copiado' : '📋 Copiar'}</button>
+        <a href={'https://wa.me/?text=' + encodeURIComponent(texto)} target="_blank" rel="noreferrer"
+          style={{ ...btnMini, background: '#25d366', color: '#fff', border: 'none', textDecoration: 'none' }}>📱 Enviar por WhatsApp</a>
+        <button onClick={onCerrar} style={{ ...btnMini, background: 'transparent', color: '#065f46', marginLeft: 'auto' }}>Cerrar</button>
+      </div>
+    </div>
   )
 }
 

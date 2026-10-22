@@ -1,11 +1,15 @@
 // ─────────────────────────────────────────────────────────
-// Generador de PDF de facturas — abre una ventana imprimible
-// (sin librerías externas; el usuario imprime o guarda como PDF)
+// PDF de facturas y presupuestos
+// Genera un PDF de verdad (archivo .pdf) con jsPDF, listo para
+// ver, descargar o compartir (WhatsApp, email…) con un toque.
 // ─────────────────────────────────────────────────────────
 
-const ROJO = '#c81019'
+const ROJO = [200, 16, 25]       // #c81019
+const ROJO_SUAVE = [253, 242, 242]
+const GRIS = [110, 110, 110]
+const NEGRO = [26, 26, 26]
 
-// Datos fiscales de la empresa (Quesos Maher SL)
+// Datos fiscales por defecto (si en Ajustes no hay otros)
 const EMPRESA = {
   nombre: 'QUESOS MAHER SL',
   nif: 'B37267259',
@@ -15,7 +19,11 @@ const EMPRESA = {
   provincia: 'Salamanca',
 }
 
-const fmt = (n) => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(n || 0)
+const fmt = (n) => (Number(n) || 0).toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ' €'
+const fmtNum = (n) => {
+  const x = Number(n) || 0
+  return Number.isInteger(x) ? String(x) : x.toFixed(2).replace('.', ',')
+}
 const fmtDate = (d) => d ? new Date(d + 'T00:00:00').toLocaleDateString('es-ES') : '—'
 
 function calcTotales(doc) {
@@ -26,143 +34,296 @@ function calcTotales(doc) {
   return { base, iva, irpf, total: base + iva - irpf }
 }
 
+// Base y cuota por cada tipo de IVA (4 %, 10 %, 21 %…)
+function desgloseIVA(doc) {
+  const tipos = {}
+  ;(doc.lineas || []).forEach(l => {
+    const tipo = Number(l.iva) || 0
+    const base = (Number(l.cant) || 0) * (Number(l.precio) || 0)
+    if (!tipos[tipo]) tipos[tipo] = { tipo, base: 0, cuota: 0 }
+    tipos[tipo].base += base
+    tipos[tipo].cuota += base * tipo
+  })
+  return Object.values(tipos).sort((a, b) => a.tipo - b.tipo)
+}
+
 function direccionCliente(c) {
   if (!c) return ''
   const partes = [c.direccion, c.cp && c.ciudad ? c.cp + ' ' + c.ciudad : (c.cp || c.ciudad), c.provincia, c.pais && c.pais !== 'ES' ? c.pais : null].filter(Boolean)
   return partes.join(', ')
 }
 
-export function abrirPDFFactura(doc, cliente, opciones = {}) {
-  const totales = calcTotales(doc)
-  const dir = direccionCliente(cliente)
-  const tipoDoc = doc._tipo || 'FACTURA'
-  const cuenta = opciones.cuenta || null
-  const ibanIngreso = cuenta?.iban || ''
-  const bancoIngreso = cuenta?.banco || cuenta?.alias || ''
-  const comentario = doc.notas || ''
-
-  const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
-<title>${tipoDoc} ${doc.id} - ${EMPRESA.nombre}</title>
-<style>
-@page { size: A4; margin: 12mm; }
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: Helvetica, Arial, sans-serif; color: #1a1a1a; background: #fff; padding: 16px; line-height: 1.4; font-size: 12px; }
-.top-bar { height: 6px; background: ${ROJO}; margin-bottom: 20px; }
-.header { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 14px; border-bottom: 3px solid ${ROJO}; }
-.logo { font-family: Georgia, serif; font-size: 44px; font-weight: 900; color: ${ROJO}; letter-spacing: -1.5px; line-height: 1; }
-.sub-logo { font-size: 9px; margin-top: 4px; font-weight: 700; letter-spacing: 1px; color: #828282; }
-.empresa-info { text-align: right; font-size: 10px; color: #4b4b4b; line-height: 1.6; }
-.titulo-doc { display: flex; justify-content: space-between; align-items: flex-start; margin: 24px 0 22px; }
-.titulo-doc h1 { font-family: Georgia, serif; font-size: 28px; color: ${ROJO}; letter-spacing: -1px; }
-.titulo-doc .num { font-size: 13px; font-weight: 700; margin-top: 2px; }
-.fecha-box { background: #fdf2f2; border: 1.5px solid ${ROJO}; border-radius: 4px; padding: 8px 14px; text-align: right; }
-.fecha-box .lbl { font-size: 8px; color: ${ROJO}; font-weight: 800; text-transform: uppercase; }
-.fecha-box .val { font-size: 13px; font-weight: 800; margin-top: 2px; }
-.fecha-box .sub { font-size: 9px; color: #828282; margin-top: 3px; }
-.cliente { margin-bottom: 20px; }
-.cliente-label { font-size: 10px; color: ${ROJO}; font-weight: 800; text-transform: uppercase; border-bottom: 1.5px solid ${ROJO}; padding-bottom: 3px; display: inline-block; margin-bottom: 6px; }
-.cliente-nombre { font-family: Georgia, serif; font-weight: 800; font-size: 16px; }
-.cliente-datos { font-size: 11px; color: #4b4b4b; margin-top: 5px; line-height: 1.6; }
-table { width: 100%; border-collapse: collapse; margin-bottom: 18px; }
-thead { background: ${ROJO}; color: #fff; }
-thead th { padding: 8px 10px; text-align: left; font-size: 10px; font-weight: 800; text-transform: uppercase; }
-thead th.r { text-align: right; }
-tbody tr:nth-child(odd) { background: #fdf2f2; }
-tbody td { padding: 10px; border-bottom: 1px solid #f0f0f0; font-size: 11px; }
-tbody td.r { text-align: right; }
-tbody td.b { font-weight: 700; }
-tbody tr:last-child td { border-bottom: 2px solid ${ROJO}; }
-.bottom { display: flex; justify-content: space-between; gap: 16px; }
-.info-pago { flex: 1; padding: 12px; background: #fdf2f2; border-left: 3px solid ${ROJO}; font-size: 10px; }
-.info-pago-title { font-weight: 800; color: ${ROJO}; font-size: 10px; text-transform: uppercase; margin-bottom: 4px; }
-.totales { width: 240px; background: #fdf2f2; border: 1.5px solid ${ROJO}; border-radius: 4px; padding: 12px; }
-.tr { display: flex; justify-content: space-between; padding: 3px 0; font-size: 11px; color: #4b4b4b; }
-.tr span:last-child { color: #1a1a1a; font-weight: 600; }
-.tr.irpf span { color: ${ROJO}; }
-.tr.total { background: ${ROJO}; color: #fff; padding: 10px 14px; margin-top: 8px; border-radius: 4px; font-family: Georgia, serif; font-size: 15px; font-weight: 900; }
-.tr.total span { color: #fff !important; font-weight: 900 !important; }
-.pie { margin-top: 30px; padding-top: 12px; border-top: 2px solid ${ROJO}; text-align: center; }
-.pie-logo { font-family: Georgia, serif; font-size: 14px; font-weight: 900; color: ${ROJO}; }
-.pie-info { font-size: 9px; color: #828282; margin-top: 3px; }
-.actions { position: fixed; bottom: 20px; right: 20px; z-index: 100; display: flex; gap: 10px; }
-.actions button { color: #fff; border: none; padding: 14px 22px; border-radius: 10px; font-size: 14px; font-weight: 700; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
-.btn-imprimir { background: #374151; }
-.btn-descargar { background: ${ROJO}; }
-.aviso-descarga { position: fixed; bottom: 76px; right: 20px; background: #1f2937; color: #fff; padding: 10px 14px; border-radius: 8px; font-size: 12px; max-width: 260px; z-index: 100; line-height: 1.4; box-shadow: 0 4px 12px rgba(0,0,0,0.25); }
-@media print { .actions, .aviso-descarga { display: none !important; } }
-</style></head><body>
-<div class="aviso-descarga" id="avisoDesc" style="display:none">Para <b>descargar el PDF</b>: en la ventana de impresión, elige como destino <b>"Guardar como PDF"</b>.</div>
-<div class="actions">
-  <button class="btn-imprimir" onclick="window.print()">🖨️ Imprimir</button>
-  <button class="btn-descargar" onclick="descargarPDF()">📥 Descargar PDF</button>
-</div>
-<script>
-  function descargarPDF() {
-    var a = document.getElementById('avisoDesc');
-    if (a) a.style.display = 'block';
-    setTimeout(function(){ window.print(); }, 400);
+function datosEmpresa(e) {
+  if (!e || !e.nombre) return { ...EMPRESA }
+  return {
+    nombre: e.nombre, nif: e.nif || EMPRESA.nif, direccion: e.direccion || EMPRESA.direccion,
+    cp: e.cp || EMPRESA.cp, ciudad: e.ciudad || EMPRESA.ciudad, provincia: e.provincia || '',
+    telefono: e.telefono || '', email: e.email || '',
   }
-</script>
-<div class="top-bar"></div>
-<div class="header">
-  <div>
-    <div class="logo">MAHER</div>
-    <div class="sub-logo">QUESOS MAHER SL</div>
-  </div>
-  <div class="empresa-info">
-    <div>C.I.F.: ${EMPRESA.nif}</div>
-    <div>${EMPRESA.direccion}</div>
-    <div>${EMPRESA.cp} ${EMPRESA.ciudad}</div>
-  </div>
-</div>
-<div class="titulo-doc">
-  <div><h1>${tipoDoc}</h1><div class="num">Nº ${doc.id}</div></div>
-  <div class="fecha-box">
-    <div class="lbl">Fecha emisión</div><div class="val">${fmtDate(doc.fecha)}</div>
-    <div class="sub">Vence: ${fmtDate(doc.vencimiento)}</div>
-  </div>
-</div>
-<div class="cliente">
-  <div class="cliente-label">Facturar a</div>
-  <div class="cliente-nombre">${cliente?.razon_social || '—'}</div>
-  <div class="cliente-datos">
-    <div>NIF/CIF: ${cliente?.nif || '—'}</div>
-    ${dir ? '<div>' + dir + '</div>' : ''}
-    ${cliente?.email ? '<div>' + cliente.email + '</div>' : ''}
-  </div>
-</div>
-<table>
-  <thead><tr><th>Descripción</th><th class="r">Cant.</th><th class="r">Precio</th><th class="r">IVA</th><th class="r">Subtotal</th></tr></thead>
-  <tbody>
-    ${(doc.lineas || []).map(l => '<tr><td>' + (l.desc || '') + '</td><td class="r">' + l.cant + '</td><td class="r">' + fmt(l.precio) + '</td><td class="r">' + Math.round((l.iva || 0) * 100) + '%</td><td class="r b">' + fmt((l.cant || 0) * (l.precio || 0)) + '</td></tr>').join('')}
-  </tbody>
-</table>
-<div class="bottom">
-  <div class="info-pago">
-    <div class="info-pago-title">Información de pago</div>
-    ${cliente?.forma_pago ? '<div>Forma de pago: ' + cliente.forma_pago + '</div>' : ''}
-    ${doc.vencimiento ? '<div>Vencimiento: ' + fmtDate(doc.vencimiento) + '</div>' : ''}
-    ${ibanIngreso ? '<div style="margin-top:4px"><strong>Ingresar en:</strong></div>' + (bancoIngreso ? '<div>' + bancoIngreso + '</div>' : '') + '<div><strong>IBAN:</strong> ' + ibanIngreso + '</div>' : (cliente?.iban ? '<div><strong>IBAN:</strong> ' + cliente.iban + '</div>' : '')}
-    ${comentario ? '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #f0d0d0"><strong>Observaciones:</strong><br>' + comentario.replace(/\n/g, '<br>') + '</div>' : ''}
-  </div>
-  <div class="totales">
-    <div class="tr"><span>Base imponible</span><span>${fmt(totales.base)}</span></div>
-    <div class="tr"><span>IVA</span><span>${fmt(totales.iva)}</span></div>
-    ${totales.irpf > 0 ? `<div class="tr irpf"><span>Retenciones (${Math.round((doc.retencion_irpf || 0) * 100)}%)</span><span>−${fmt(totales.irpf)}</span></div>` : ''}
-    <div class="tr total"><span>TOTAL</span><span>${fmt(totales.total)}</span></div>
-  </div>
-</div>
-<div class="pie">
-  <div class="pie-logo">MAHER</div>
-  <div class="pie-info">${EMPRESA.nombre} · NIF: ${EMPRESA.nif}</div>
-</div>
-</body></html>`
+}
 
+export function nombreArchivoPDF(doc, cliente) {
+  const tipo = (doc._tipo || 'FACTURA') === 'PRESUPUESTO' ? 'Presupuesto' : 'Factura'
+  const cli = (cliente?.razon_social || '').replace(/[\\/:*?"<>|]+/g, '').trim().slice(0, 40)
+  return `${tipo} ${doc.id || ''}${cli ? ' - ' + cli : ''}.pdf`.replace(/\s+/g, ' ')
+}
+
+// ─── Construye el PDF y devuelve un Blob ───
+export async function generarPDFFactura(doc, cliente, opciones = {}) {
+  const [{ jsPDF }, modTabla] = await Promise.all([import('jspdf'), import('jspdf-autotable')])
+  // La librería se exporta de forma distinta según el empaquetador: buscamos la función
+  const candidatas = [modTabla.autoTable, modTabla.default, modTabla.default?.default, modTabla.default?.autoTable]
+  const autoTable = candidatas.find(f => typeof f === 'function')
+  const pdf = new jsPDF({ unit: 'mm', format: 'a4' })
+  const W = 210, M = 15, DER = W - M
+
+  const emp = datosEmpresa(opciones.empresa)
+  const config = opciones.empresa?.config || {}
+  const tipoDoc = doc._tipo || 'FACTURA'
+  const esPresupuesto = tipoDoc === 'PRESUPUESTO'
+  const totales = calcTotales(doc)
+  const cuenta = opciones.cuenta || null
+
+  const color = (c) => pdf.setTextColor(c[0], c[1], c[2])
+
+  // ── Cabecera: logo y datos de la empresa ──
+  pdf.setFont('times', 'bold'); pdf.setFontSize(32); color(ROJO)
+  pdf.text('MAHER', M, 25)
+  pdf.setFont('helvetica', 'bold'); pdf.setFontSize(7); color(GRIS)
+  pdf.text('QUESOS MAHER SL', M + 0.5, 30.5, { charSpace: 0.6 })
+
+  pdf.setFont('helvetica', 'bold'); pdf.setFontSize(9); color(NEGRO)
+  pdf.text(emp.nombre, DER, 17, { align: 'right' })
+  pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); color(GRIS)
+  const lineasEmp = [
+    'CIF: ' + emp.nif,
+    emp.direccion,
+    [emp.cp, emp.ciudad].filter(Boolean).join(' ') + (emp.provincia && emp.provincia.toUpperCase() !== String(emp.ciudad).toUpperCase() ? ' (' + emp.provincia + ')' : ''),
+    [emp.telefono, emp.email].filter(Boolean).join(' · '),
+  ].filter(Boolean)
+  lineasEmp.forEach((t, i) => pdf.text(t, DER, 21.5 + i * 4, { align: 'right' }))
+
+  pdf.setDrawColor(ROJO[0], ROJO[1], ROJO[2]); pdf.setLineWidth(0.8)
+  pdf.line(M, 38, DER, 38)
+
+  // ── Título y fechas ──
+  pdf.setFont('helvetica', 'bold'); pdf.setFontSize(22); color(NEGRO)
+  pdf.text(tipoDoc, M, 51)
+  pdf.setFont('helvetica', 'normal'); pdf.setFontSize(10); color(GRIS)
+  pdf.text('Nº ' + (doc.id || '—'), M, 57)
+
+  const cajaFecha = (x, etiqueta, valor) => {
+    pdf.setFillColor(ROJO_SUAVE[0], ROJO_SUAVE[1], ROJO_SUAVE[2])
+    pdf.roundedRect(x, 44, 38, 15, 1.5, 1.5, 'F')
+    pdf.setFont('helvetica', 'bold'); pdf.setFontSize(6.5); color(ROJO)
+    pdf.text(etiqueta, x + 4, 49.5)
+    pdf.setFontSize(11); color(NEGRO)
+    pdf.text(valor, x + 4, 55.5)
+  }
+  cajaFecha(DER - 80, 'FECHA', fmtDate(doc.fecha))
+  if (doc.vencimiento) cajaFecha(DER - 38, esPresupuesto ? 'VÁLIDO HASTA' : 'VENCIMIENTO', fmtDate(doc.vencimiento))
+
+  // ── Cliente y forma de pago ──
+  let y = 72
+  pdf.setFont('helvetica', 'bold'); pdf.setFontSize(7); color(ROJO)
+  pdf.text(esPresupuesto ? 'PRESUPUESTO PARA' : 'FACTURAR A', M, y)
+  pdf.setFontSize(11.5); color(NEGRO)
+  const nombreCli = pdf.splitTextToSize(cliente?.razon_social || '—', 100)
+  pdf.text(nombreCli, M, y + 6)
+  let yCli = y + 6 + nombreCli.length * 5
+  pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8.5); color(GRIS)
+  const datosCli = [
+    cliente?.nif ? 'NIF/CIF: ' + cliente.nif : null,
+    ...(direccionCliente(cliente) ? pdf.splitTextToSize(direccionCliente(cliente), 100) : []),
+    cliente?.email || null,
+    cliente?.telefono || null,
+  ].filter(Boolean)
+  datosCli.forEach(t => { pdf.text(t, M, yCli); yCli += 4.2 })
+
+  let yPago = y
+  const xPago = 125
+  const formaPago = cliente?.forma_pago || doc.forma_pago || ''
+  const iban = cuenta?.iban || ''
+  const banco = cuenta?.banco || cuenta?.alias || ''
+  if (formaPago || iban) {
+    pdf.setFont('helvetica', 'bold'); pdf.setFontSize(7); color(ROJO)
+    pdf.text('FORMA DE PAGO', xPago, yPago)
+    yPago += 6
+    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8.5); color(NEGRO)
+    if (formaPago) { pdf.text(formaPago, xPago, yPago); yPago += 4.5 }
+    if (iban) {
+      if (banco) { color(GRIS); pdf.text(banco, xPago, yPago); yPago += 4.2 }
+      pdf.setFont('helvetica', 'bold'); color(NEGRO)
+      pdf.text('IBAN ' + iban, xPago, yPago); yPago += 4.2
+    }
+  }
+
+  // ── Líneas ──
+  autoTable(pdf, {
+    startY: Math.max(yCli, yPago) + 6,
+    margin: { left: M, right: M, bottom: 22 },
+    head: [['Descripción', 'Cant.', 'Precio', 'IVA', 'Importe']],
+    body: (doc.lineas || []).map(l => [
+      l.desc || '',
+      fmtNum(l.cant),
+      fmt(l.precio),
+      Math.round((Number(l.iva) || 0) * 100) + ' %',
+      fmt((Number(l.cant) || 0) * (Number(l.precio) || 0)),
+    ]),
+    theme: 'plain',
+    styles: { font: 'helvetica', fontSize: 9, textColor: NEGRO, cellPadding: { top: 3, bottom: 3, left: 3, right: 3 } },
+    headStyles: { fillColor: ROJO, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8 },
+    alternateRowStyles: { fillColor: [250, 250, 250] },
+    columnStyles: {
+      0: { cellWidth: 'auto' },
+      1: { halign: 'right', cellWidth: 16 },
+      2: { halign: 'right', cellWidth: 26 },
+      3: { halign: 'right', cellWidth: 16 },
+      4: { halign: 'right', cellWidth: 28, fontStyle: 'bold' },
+    },
+    didParseCell: (d) => { if (d.section === 'head' && d.column.index > 0) d.cell.styles.halign = 'right' },
+  })
+
+  y = pdf.lastAutoTable.finalY + 8
+  if (y > 225) { pdf.addPage(); y = 25 }
+
+  // ── Desglose de IVA (izquierda) ──
+  const desglose = desgloseIVA(doc)
+  pdf.setFont('helvetica', 'bold'); pdf.setFontSize(7); color(ROJO)
+  pdf.text('DESGLOSE DE IVA', M, y)
+  let yD = y + 5
+  pdf.setFontSize(7.5); color(GRIS)
+  pdf.text('Base', M, yD); pdf.text('Tipo', M + 38, yD); pdf.text('Cuota', M + 75, yD, { align: 'right' })
+  pdf.setDrawColor(220, 220, 220); pdf.setLineWidth(0.2); pdf.line(M, yD + 1.5, M + 75, yD + 1.5)
+  pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8.5); color(NEGRO)
+  desglose.forEach(d => {
+    yD += 5
+    pdf.text(fmt(d.base), M, yD)
+    pdf.text(Math.round(d.tipo * 100) + ' %', M + 38, yD)
+    pdf.text(fmt(d.cuota), M + 75, yD, { align: 'right' })
+  })
+
+  // ── Totales (derecha) ──
+  const xT = DER - 70
+  let yT = y - 1
+  const filaTotal = (etq, val, rojo) => {
+    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(9); color(rojo ? ROJO : GRIS)
+    pdf.text(etq, xT + 3, yT + 4)
+    pdf.setFont('helvetica', 'bold'); color(rojo ? ROJO : NEGRO)
+    pdf.text(val, DER - 3, yT + 4, { align: 'right' })
+    yT += 6
+  }
+  filaTotal('Base imponible', fmt(totales.base))
+  filaTotal('IVA', fmt(totales.iva))
+  if (totales.irpf > 0) filaTotal(`Retención IRPF (${Math.round((Number(doc.retencion_irpf) || 0) * 100)} %)`, '−' + fmt(totales.irpf), true)
+  pdf.setFillColor(ROJO[0], ROJO[1], ROJO[2])
+  pdf.roundedRect(xT, yT + 1, 70, 11, 1.5, 1.5, 'F')
+  pdf.setFont('helvetica', 'bold'); pdf.setFontSize(10); pdf.setTextColor(255, 255, 255)
+  pdf.text('TOTAL', xT + 4, yT + 8.2)
+  pdf.setFontSize(13)
+  pdf.text(fmt(totales.total), DER - 4, yT + 8.5, { align: 'right' })
+  yT += 14
+
+  y = Math.max(yD, yT) + 10
+
+  // ── Observaciones y notas ──
+  const bloqueTexto = (titulo, texto) => {
+    if (!texto) return
+    const lineas = pdf.splitTextToSize(String(texto), W - 2 * M)
+    if (y + 6 + lineas.length * 4 > 272) { pdf.addPage(); y = 25 }
+    pdf.setFont('helvetica', 'bold'); pdf.setFontSize(7); color(ROJO)
+    pdf.text(titulo, M, y)
+    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8.5); color(NEGRO)
+    pdf.text(lineas, M, y + 4.5)
+    y += 8 + lineas.length * 4
+  }
+  bloqueTexto('OBSERVACIONES', doc.notas)
+  const notaFija = esPresupuesto ? config.notasPresupuesto : config.notasFactura
+  if (notaFija) {
+    pdf.setFont('helvetica', 'italic'); pdf.setFontSize(7.5); color(GRIS)
+    const l = pdf.splitTextToSize(notaFija, W - 2 * M)
+    if (y + l.length * 3.5 > 272) { pdf.addPage(); y = 25 }
+    pdf.text(l, M, y)
+  }
+
+  // ── Pie en todas las páginas ──
+  const paginas = pdf.getNumberOfPages()
+  for (let p = 1; p <= paginas; p++) {
+    pdf.setPage(p)
+    pdf.setDrawColor(ROJO[0], ROJO[1], ROJO[2]); pdf.setLineWidth(0.4)
+    pdf.line(M, 280, DER, 280)
+    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7); color(GRIS)
+    pdf.text(`${emp.nombre} · CIF ${emp.nif} · ${emp.direccion} · ${emp.cp} ${emp.ciudad}`, M, 285)
+    if (config.textoPie) pdf.text(pdf.splitTextToSize(config.textoPie, 150), M, 289)
+    pdf.text(`Página ${p} de ${paginas}`, DER, 285, { align: 'right' })
+  }
+
+  pdf.setProperties({ title: `${tipoDoc} ${doc.id || ''}`, author: emp.nombre, creator: 'MAHER' })
+  return pdf.output('blob')
+}
+
+// ¿El navegador deja compartir archivos? (móvil: sí; ordenador: depende)
+export function puedeCompartirArchivos() {
+  try {
+    const f = new File(['x'], 'prueba.pdf', { type: 'application/pdf' })
+    return !!(navigator.canShare && navigator.canShare({ files: [f] }))
+  } catch (e) { return false }
+}
+
+// ─── Descargar el archivo directamente ───
+export async function descargarPDFFactura(doc, cliente, opciones = {}) {
+  const blob = await generarPDFFactura(doc, cliente, opciones)
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = nombreArchivoPDF(doc, cliente)
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 60000)
+}
+
+// ─── Compartir (WhatsApp, email…). Si no se puede, descarga ───
+export async function compartirPDFFactura(doc, cliente, opciones = {}) {
+  const blob = await generarPDFFactura(doc, cliente, opciones)
+  const nombre = nombreArchivoPDF(doc, cliente)
+  const archivo = new File([blob], nombre, { type: 'application/pdf' })
+  if (navigator.canShare && navigator.canShare({ files: [archivo] })) {
+    try {
+      await navigator.share({ files: [archivo], title: nombre.replace(/\.pdf$/, '') })
+      return 'compartido'
+    } catch (e) {
+      if (e && e.name === 'AbortError') return 'cancelado'
+    }
+  }
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = nombre
+  document.body.appendChild(a); a.click(); a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 60000)
+  return 'descargado'
+}
+
+// ─── Ver el PDF en una pestaña nueva ───
+// (se abre la pestaña antes de generar el PDF para que el navegador no la bloquee)
+export async function abrirPDFFactura(doc, cliente, opciones = {}) {
   const ventana = window.open('', '_blank')
   if (ventana) {
-    ventana.document.write(html)
-    ventana.document.close()
-  } else {
-    alert('El navegador ha bloqueado la ventana del PDF. Permite las ventanas emergentes para este sitio.')
+    try { ventana.document.write('<p style="font-family:sans-serif;padding:24px;color:#6b7280">Preparando el PDF…</p>') } catch (e) {}
+  }
+  try {
+    const blob = await generarPDFFactura(doc, cliente, opciones)
+    const url = URL.createObjectURL(blob)
+    if (ventana) ventana.location.href = url
+    else {
+      // Ventanas emergentes bloqueadas: lo descargamos
+      const a = document.createElement('a')
+      a.href = url; a.download = nombreArchivoPDF(doc, cliente)
+      document.body.appendChild(a); a.click(); a.remove()
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 120000)
+  } catch (e) {
+    if (ventana) ventana.close()
+    alert('No se pudo generar el PDF: ' + (e.message || e))
   }
 }

@@ -1,12 +1,12 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useColeccion } from './hooks/useColeccion'
-import { presupuestosApi, facturasApi, clientesApi, miEmpresaId, siguienteNumeroFactura } from './lib/api'
-import { abrirPDFFactura } from './lib/pdf'
+import { presupuestosApi, facturasApi, clientesApi, miEmpresaId, siguienteNumeroFactura, empresaApi } from './lib/api'
+import { abrirPDFFactura, descargarPDFFactura, compartirPDFFactura, puedeCompartirArchivos } from './lib/pdf'
 
 const ROJO = '#c81019'
 const HOY = new Date().toISOString().split('T')[0]
 
-const fmt = (n) => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(n || 0)
+const fmt = (n) => (Number(n) || 0).toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ' €'
 const fmtDate = (d) => d ? new Date(d + 'T00:00:00').toLocaleDateString('es-ES') : '—'
 
 function calcTotales(doc) {
@@ -34,6 +34,11 @@ export default function Presupuestos() {
   const [busqueda, setBusqueda] = useState('')
   const [guardando, setGuardando] = useState(false)
   const [aviso, setAviso] = useState(null)
+  const [empresa, setEmpresa] = useState(null)
+
+  useEffect(() => {
+    empresaApi.get().then(setEmpresa).catch(() => {})
+  }, [])
 
   const getCliente = (id) => clientes.items.find(c => c.id === id)
 
@@ -150,10 +155,19 @@ export default function Presupuestos() {
     }
   }
 
+  // Reutilizamos el PDF de factura, indicando que es presupuesto
+  const sePuedeCompartir = puedeCompartirArchivos()
+  const docPDF = (p) => ({ ...p, vencimiento: p.validez, _tipo: 'PRESUPUESTO' })
   function verPDF(p) {
-    const cliente = getCliente(p.cliente_id)
-    // Reutilizamos el PDF de factura, indicando que es presupuesto
-    abrirPDFFactura({ ...p, vencimiento: p.validez, _tipo: 'PRESUPUESTO' }, cliente)
+    abrirPDFFactura(docPDF(p), getCliente(p.cliente_id), { empresa })
+  }
+  async function descargarPDF(p) {
+    try { await descargarPDFFactura(docPDF(p), getCliente(p.cliente_id), { empresa }) }
+    catch (e) { setAviso({ tipo: 'error', texto: 'No se pudo generar el PDF: ' + (e.message || e) }) }
+  }
+  async function compartirPDF(p) {
+    try { await compartirPDFFactura(docPDF(p), getCliente(p.cliente_id), { empresa }) }
+    catch (e) { setAviso({ tipo: 'error', texto: 'No se pudo compartir el PDF: ' + (e.message || e) }) }
   }
 
   // ══════════════════ FORMULARIO ══════════════════
@@ -337,7 +351,9 @@ export default function Presupuestos() {
                 </div>
 
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 12, paddingTop: 12, borderTop: '1px solid #f3f4f6' }}>
-                  <Btn onClick={() => verPDF(p)} bg="#eff6ff" col="#1e40af">📄 PDF</Btn>
+                  <Btn onClick={() => verPDF(p)} bg="#eff6ff" col="#1e40af">📄 Ver PDF</Btn>
+                  <Btn onClick={() => descargarPDF(p)} bg="#eff6ff" col="#1e40af">📥 Descargar</Btn>
+                  {sePuedeCompartir && <Btn onClick={() => compartirPDF(p)} bg="#dcfce7" col="#166534">📤 Enviar PDF</Btn>}
                   <Btn onClick={() => editar(p)} bg="#f9fafb" col="#374151">✏️ Editar</Btn>
                   {p.estado === 'pendiente' && <Btn onClick={() => cambiarEstado(p, 'aceptado')} bg="#d1fae5" col="#065f46">✓ Aceptado</Btn>}
                   {p.estado === 'pendiente' && <Btn onClick={() => cambiarEstado(p, 'rechazado')} bg="#fef2f2" col="#991b1b">✕ Rechazado</Btn>}

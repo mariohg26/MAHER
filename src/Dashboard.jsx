@@ -1,10 +1,10 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useColeccion } from './hooks/useColeccion'
 import { facturasApi, gastosApi, clientesApi, presupuestosApi } from './lib/api'
 
 const ROJO = '#c81019'
 
-const fmt = (n) => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(n || 0)
+const fmt = (n) => (Number(n) || 0).toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ' €'
 const fmtDate = (d) => d ? new Date(d + 'T00:00:00').toLocaleDateString('es-ES') : '—'
 
 function calcTotales(doc) {
@@ -17,31 +17,70 @@ function calcTotales(doc) {
 
 const WIDGETS = [
   { id: 'kpis', label: '📊 KPIs principales', def: true },
+  { id: 'previsionTrimestre', label: '🧾 Previsión de IVA del trimestre', def: true },
   { id: 'alertas', label: '🚨 Alertas inteligentes', def: true },
+  { id: 'graficoMensual', label: '📈 Gráfico mes a mes', def: true },
   { id: 'ultimasFacturas', label: '📄 Últimas facturas', def: true },
   { id: 'pendientesCobro', label: '⏳ Pendientes de cobro', def: true },
   { id: 'topClientes', label: '🏆 Top 5 clientes', def: false },
   { id: 'topGastos', label: '💸 Top 5 gastos por categoría', def: false },
-  { id: 'comparativaMensual', label: '📈 Comparativa últimos 6 meses', def: false },
   { id: 'proximosVencs', label: '📆 Próximos vencimientos fiscales', def: false },
 ]
 
+// Widgets que existían antes de esta versión. Los nuevos que vengan activados
+// por defecto se añaden solos a la configuración guardada de cada usuario.
+const WIDGETS_ANTIGUOS = ['kpis', 'alertas', 'ultimasFacturas', 'pendientesCobro', 'topClientes', 'topGastos', 'comparativaMensual', 'proximosVencs']
+const RENOMBRADOS = { comparativaMensual: 'graficoMensual' }
+
 function leerWidgets() {
+  const porDefecto = WIDGETS.filter(w => w.def).map(w => w.id)
   try {
     const g = JSON.parse(localStorage.getItem('maher_widgets'))
-    if (Array.isArray(g)) return g
+    if (Array.isArray(g)) {
+      let conocidos = null
+      try { conocidos = JSON.parse(localStorage.getItem('maher_widgets_conocidos')) } catch (e) {}
+      if (!Array.isArray(conocidos)) conocidos = WIDGETS_ANTIGUOS
+      const actuales = [...new Set(g.map(id => RENOMBRADOS[id] || id))].filter(id => WIDGETS.some(w => w.id === id))
+      const nuevos = porDefecto.filter(id => !conocidos.includes(id) && !actuales.includes(id))
+      return [...actuales, ...nuevos]
+    }
   } catch (e) {}
-  return WIDGETS.filter(w => w.def).map(w => w.id)
+  return porDefecto
 }
 
-export default function Dashboard({ usuario, onNavegar }) {
+function guardarWidgets(lista) {
+  try {
+    localStorage.setItem('maher_widgets', JSON.stringify(lista))
+    localStorage.setItem('maher_widgets_conocidos', JSON.stringify(WIDGETS.map(w => w.id)))
+  } catch (e) {}
+}
+
+const MESES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
+const MESES_LARGOS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
+
+// Fecha 'YYYY-MM-DD' → { ano, mes } sin líos de zona horaria
+function partesFecha(f) {
+  if (!f) return null
+  const [a, m] = String(f).slice(0, 10).split('-').map(Number)
+  if (!a || !m) return null
+  return { ano: a, mes: m - 1 }
+}
+
+export default function Dashboard({ usuario, onNavegar, onNuevo, verCifras = true }) {
   const facturasC = useColeccion(facturasApi)
   const gastosC = useColeccion(gastosApi)
   const clientesC = useColeccion(clientesApi)
   const presupuestosC = useColeccion(presupuestosApi)
 
-  const [widgetsActivos, setWidgetsActivos] = useState(leerWidgets())
+  const [widgetsGuardados, setWidgetsActivos] = useState(leerWidgets())
+  // Los empleados no ven cifras globales: solo facturas pendientes y últimas facturas
+  const SIN_CIFRAS = ['ultimasFacturas', 'pendientesCobro']
+  const widgetsActivos = verCifras ? widgetsGuardados : widgetsGuardados.filter(id => SIN_CIFRAS.includes(id))
   const [configurando, setConfigurando] = useState(false)
+  const [mesSel, setMesSel] = useState(new Date().getMonth())
+
+  // Guarda la configuración ya migrada (para no volver a añadir widgets que el usuario quite)
+  useEffect(() => { guardarWidgets(widgetsGuardados) }, [])
 
   const facturas = facturasC.items
   const gastos = gastosC.items
@@ -52,9 +91,9 @@ export default function Dashboard({ usuario, onNavegar }) {
   const getCliente = (id) => clientes.find(c => c.id === id)
 
   function toggleWidget(id) {
-    const nuevos = widgetsActivos.includes(id) ? widgetsActivos.filter(x => x !== id) : [...widgetsActivos, id]
+    const nuevos = widgetsGuardados.includes(id) ? widgetsGuardados.filter(x => x !== id) : [...widgetsGuardados, id]
     setWidgetsActivos(nuevos)
-    try { localStorage.setItem('maher_widgets', JSON.stringify(nuevos)) } catch (e) {}
+    guardarWidgets(nuevos)
   }
 
   const HOY_D = new Date()
@@ -173,16 +212,37 @@ export default function Dashboard({ usuario, onNavegar }) {
   gastosAno.forEach(g => { porCategoria[g.categoria] = (porCategoria[g.categoria] || 0) + calcTotales(g).total })
   const topGastos = Object.entries(porCategoria).sort((a, b) => b[1] - a[1]).slice(0, 5)
 
-  // ─── Comparativa 6 meses ───
-  const ultimosMeses = []
-  for (let i = 5; i >= 0; i--) {
-    const d = new Date(anoActual, mesActual - i, 1)
-    const mes = d.getMonth(), ano = d.getFullYear()
-    const ing = facturas.filter(f => { const fd = new Date(f.fecha); return fd.getFullYear() === ano && fd.getMonth() === mes }).reduce((s, f) => s + calcTotales(f).total, 0)
-    const gas = gastos.filter(g => { const gd = new Date(g.fecha); return gd.getFullYear() === ano && gd.getMonth() === mes }).reduce((s, g) => s + calcTotales(g).total, 0)
-    ultimosMeses.push({ label: d.toLocaleDateString('es-ES', { month: 'short' }), ingresos: ing, gastos: gas })
-  }
-  const maxMes = Math.max(...ultimosMeses.map(m => Math.max(m.ingresos, m.gastos)), 1)
+  // ─── Gráfico mes a mes (año en curso, en base imponible como los KPIs) ───
+  const meses = MESES.map((label, mes) => ({ label, mes, ingresos: 0, gastos: 0, nFacturas: 0, nGastos: 0 }))
+  facturas.forEach(f => {
+    const p = partesFecha(f.fecha)
+    if (p && p.ano === anoActual) { meses[p.mes].ingresos += calcTotales(f).base; meses[p.mes].nFacturas++ }
+  })
+  gastos.forEach(g => {
+    const p = partesFecha(g.fecha)
+    if (p && p.ano === anoActual) { meses[p.mes].gastos += calcTotales(g).base; meses[p.mes].nGastos++ }
+  })
+  const maxMes = Math.max(...meses.map(m => Math.max(m.ingresos, m.gastos)), 1)
+  const mesElegido = meses[mesSel]
+  const mejorMes = meses.slice(0, mesActual + 1).reduce((a, b) => (b.ingresos > a.ingresos ? b : a), meses[0])
+
+  // ─── Previsión de IVA del trimestre en curso ───
+  const trim = Math.floor(mesActual / 3)            // 0..3
+  const iniTrim = new Date(anoActual, trim * 3, 1)
+  const finTrim = new Date(anoActual, trim * 3 + 3, 0) // último día del trimestre
+  const enTrim = (fecha) => { const p = partesFecha(fecha); return p && p.ano === anoActual && Math.floor(p.mes / 3) === trim }
+  let ivaRepT = 0, ivaSopT = 0, baseVentasT = 0
+  facturas.filter(f => enTrim(f.fecha)).forEach(f => { const t = calcTotales(f); ivaRepT += t.iva; baseVentasT += t.base })
+  gastos.filter(g => g.deducible && enTrim(g.fecha)).forEach(g => { ivaSopT += calcTotales(g).iva })
+  const resultadoT = ivaRepT - ivaSopT
+  const diasTrim = Math.round((finTrim - iniTrim) / 86400000) + 1
+  const diasPasados = Math.min(diasTrim, Math.round((HOY_D - iniTrim) / 86400000) + 1)
+  const diasQuedan = diasTrim - diasPasados
+  // Proyección lineal al ritmo actual; solo es fiable a partir de unas semanas
+  const proyeccionT = diasPasados > 0 ? resultadoT * (diasTrim / diasPasados) : resultadoT
+  const proyeccionFiable = diasPasados >= 21
+  const plazoT = trim === 3 ? new Date(anoActual + 1, 0, 30) : new Date(anoActual, trim * 3 + 3, 20)
+  const avanceT = Math.round((diasPasados / diasTrim) * 100)
 
   // ─── Pendientes de cobro ───
   const pendientesCobro = facturas.filter(f => f.estado === 'pendiente').sort((a, b) => {
@@ -200,20 +260,28 @@ export default function Dashboard({ usuario, onNavegar }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
         <div>
           <h2 style={{ fontSize: 22, fontWeight: 900, marginBottom: 4 }}>¡Hola, {usuario?.nombre || 'Mario'}! 👋</h2>
-          <p style={{ color: '#6b7280', fontSize: 13 }}>Resumen del año {anoActual}</p>
+          <p style={{ color: '#6b7280', fontSize: 13 }}>{verCifras ? `Resumen del año ${anoActual}` : 'Tus accesos rápidos'}</p>
         </div>
-        <button onClick={() => setConfigurando(!configurando)}
+        {verCifras && <button onClick={() => setConfigurando(!configurando)}
           style={{ background: configurando ? ROJO : '#f3f4f6', color: configurando ? '#fff' : '#374151', border: 'none', borderRadius: 10, padding: '8px 12px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>
           {configurando ? '✓ Hecho' : '⚙️ Configurar'}
-        </button>
+        </button>}
       </div>
+
+      {/* BOTONES RÁPIDOS */}
+      {onNuevo && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
+          <BotonRapido onClick={() => onNuevo('facturas')} texto="Nueva factura" principal />
+          <BotonRapido onClick={() => onNuevo('gastos')} texto="Nuevo gasto" />
+        </div>
+      )}
 
       {configurando && (
         <Card style={{ background: '#fef2f2', border: `2px solid ${ROJO}`, marginBottom: 14 }}>
           <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 10 }}>Elige qué quieres ver en tu inicio:</div>
           {WIDGETS.map(w => (
             <label key={w.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 8, cursor: 'pointer' }}>
-              <input type="checkbox" checked={widgetsActivos.includes(w.id)} onChange={() => toggleWidget(w.id)} style={{ width: 18, height: 18, accentColor: ROJO }} />
+              <input type="checkbox" checked={widgetsGuardados.includes(w.id)} onChange={() => toggleWidget(w.id)} style={{ width: 18, height: 18, accentColor: ROJO }} />
               <span style={{ fontSize: 14 }}>{w.label}</span>
             </label>
           ))}
@@ -227,9 +295,52 @@ export default function Dashboard({ usuario, onNavegar }) {
           <KPI label="Gastos (base)" value={fmt(totalGastos)} accent="#ef4444" sub={`${gastosAno.length} gasto(s)`} onClick={() => onNavegar('gastos')} />
           <KPI label="Beneficio" value={fmt(beneficio)} accent={beneficio >= 0 ? '#059669' : '#dc2626'} sub="Antes de impuestos" />
           <KPI label="Pendiente cobro" value={fmt(pendiente)} accent="#f59e0b" sub={`${facturas.filter(f => f.estado === 'pendiente' || f.estado === 'vencida').length} factura(s)`} onClick={() => onNavegar('facturas')} />
-          <KPI label="IVA" value={fmt(Math.abs(resIVA))} accent={resIVA >= 0 ? '#dc2626' : '#059669'} sub={resIVA >= 0 ? 'A ingresar' : 'A devolver'} />
+          <KPI label="IVA del año" value={fmt(Math.abs(resIVA))} accent={resIVA >= 0 ? '#dc2626' : '#059669'} sub={resIVA >= 0 ? 'Acumulado a ingresar' : 'Acumulado a devolver'} />
           <KPI label="Retenciones recibidas" value={fmt(irpfRetenidoClientes)} accent="#5b21b6" sub="Ingresado por clientes" />
         </div>
+      )}
+
+      {/* PREVISIÓN IVA DEL TRIMESTRE */}
+      {widgetsActivos.includes('previsionTrimestre') && (
+        <Card style={{ marginBottom: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
+            <h4 style={{ fontSize: 14, fontWeight: 800 }}>🧾 IVA del {trim + 1}T {anoActual} (Modelo 303)</h4>
+            <span style={{ fontSize: 11, color: '#6b7280' }}>
+              Se presenta hasta el {plazoT.toLocaleDateString('es-ES', { day: 'numeric', month: 'long' })}
+            </span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
+            <div style={{ background: resultadoT >= 0 ? '#fef2f2' : '#f0fdf4', borderRadius: 10, padding: 12 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase' }}>Llevas hasta hoy</div>
+              <div style={{ fontSize: 22, fontWeight: 900, color: resultadoT >= 0 ? '#dc2626' : '#059669', marginTop: 2 }}>{fmt(Math.abs(resultadoT))}</div>
+              <div style={{ fontSize: 11, color: '#6b7280' }}>{resultadoT >= 0 ? 'a pagar' : 'a devolver'}</div>
+            </div>
+            <div style={{ background: '#f9fafb', borderRadius: 10, padding: 12 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase' }}>Al cierre, a este ritmo</div>
+              {proyeccionFiable ? (
+                <>
+                  <div style={{ fontSize: 22, fontWeight: 900, color: '#111827', marginTop: 2 }}>≈ {fmt(Math.abs(proyeccionT))}</div>
+                  <div style={{ fontSize: 11, color: '#6b7280' }}>estimación, {proyeccionT >= 0 ? 'a pagar' : 'a devolver'}</div>
+                </>
+              ) : (
+                <>
+                  <div style={{ fontSize: 15, fontWeight: 800, color: '#9ca3af', marginTop: 6 }}>Aún es pronto</div>
+                  <div style={{ fontSize: 11, color: '#6b7280' }}>la estimación sale a partir de la 3.ª semana</div>
+                </>
+              )}
+            </div>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#374151', marginTop: 12, gap: 10, flexWrap: 'wrap' }}>
+            <span>IVA de tus facturas: <b>{fmt(ivaRepT)}</b></span>
+            <span>IVA de tus gastos: <b>−{fmt(ivaSopT)}</b></span>
+          </div>
+          <div style={{ height: 6, background: '#e5e7eb', borderRadius: 3, marginTop: 10, overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: `${avanceT}%`, background: ROJO }}></div>
+          </div>
+          <div style={{ fontSize: 11, color: '#6b7280', marginTop: 4 }}>
+            Trimestre al {avanceT}% · {diasQuedan === 0 ? 'último día' : `quedan ${diasQuedan} días`} · {fmt(baseVentasT)} facturados (base)
+          </div>
+        </Card>
       )}
 
       {/* ALERTAS */}
@@ -261,6 +372,51 @@ export default function Dashboard({ usuario, onNavegar }) {
           <div style={{ fontSize: 28 }}>✨</div>
           <div style={{ fontSize: 13, fontWeight: 700, color: '#065f46', marginTop: 6 }}>Todo en orden</div>
           <div style={{ fontSize: 11, color: '#065f46', opacity: 0.8 }}>No hay alertas pendientes</div>
+        </Card>
+      )}
+
+      {/* GRÁFICO MES A MES */}
+      {widgetsActivos.includes('graficoMensual') && (
+        <Card style={{ marginBottom: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+            <h4 style={{ fontSize: 14, fontWeight: 800 }}>📈 Mes a mes {anoActual}</h4>
+            <div style={{ display: 'flex', gap: 12, fontSize: 11, color: '#374151' }}>
+              <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: '#1a56db', marginRight: 4 }}></span>Ingresos</span>
+              <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: '#ef4444', marginRight: 4 }}></span>Gastos</span>
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 150, borderBottom: '1px solid #e5e7eb' }}>
+            {meses.map(m => {
+              const futuro = m.mes > mesActual
+              const sel = m.mes === mesSel
+              return (
+                <button key={m.mes} onClick={() => !futuro && setMesSel(m.mes)} disabled={futuro}
+                  title={futuro ? '' : `${MESES_LARGOS[m.mes]}: ingresos ${fmt(m.ingresos)} · gastos ${fmt(m.gastos)}`}
+                  style={{ flex: 1, height: '100%', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', gap: 2, padding: '0 1px', border: 'none', borderRadius: '6px 6px 0 0', background: sel ? '#fef2f2' : 'transparent', cursor: futuro ? 'default' : 'pointer' }}>
+                  <div style={{ width: '38%', maxWidth: 14, height: `${(m.ingresos / maxMes) * 92}%`, minHeight: futuro ? 0 : 2, background: '#1a56db', borderRadius: '3px 3px 0 0', opacity: sel || futuro ? 1 : 0.75 }}></div>
+                  <div style={{ width: '38%', maxWidth: 14, height: `${(m.gastos / maxMes) * 92}%`, minHeight: futuro ? 0 : 2, background: '#ef4444', borderRadius: '3px 3px 0 0', opacity: sel || futuro ? 1 : 0.75 }}></div>
+                </button>
+              )
+            })}
+          </div>
+          <div style={{ display: 'flex', gap: 2, marginTop: 4 }}>
+            {meses.map(m => (
+              <div key={m.mes} style={{ flex: 1, textAlign: 'center', fontSize: 10, fontWeight: m.mes === mesSel ? 900 : 700, color: m.mes === mesSel ? ROJO : m.mes > mesActual ? '#d1d5db' : '#6b7280' }}>{m.label}</div>
+            ))}
+          </div>
+          <div style={{ background: '#f9fafb', borderRadius: 10, padding: 12, marginTop: 12 }}>
+            <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 6, textTransform: 'capitalize' }}>{MESES_LARGOS[mesSel]}</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+              <Dato label="Ingresos" valor={fmt(mesElegido.ingresos)} color="#1a56db" sub={`${mesElegido.nFacturas} factura(s)`} />
+              <Dato label="Gastos" valor={fmt(mesElegido.gastos)} color="#ef4444" sub={`${mesElegido.nGastos} gasto(s)`} />
+              <Dato label="Diferencia" valor={fmt(mesElegido.ingresos - mesElegido.gastos)} color={mesElegido.ingresos - mesElegido.gastos >= 0 ? '#059669' : '#dc2626'} />
+            </div>
+          </div>
+          {mejorMes.ingresos > 0 && (
+            <div style={{ fontSize: 11, color: '#6b7280', marginTop: 8 }}>
+              Mejor mes del año: <b style={{ textTransform: 'capitalize' }}>{MESES_LARGOS[mejorMes.mes]}</b> con {fmt(mejorMes.ingresos)} facturados. Toca una barra para ver cada mes.
+            </div>
+          )}
         </Card>
       )}
 
@@ -330,28 +486,6 @@ export default function Dashboard({ usuario, onNavegar }) {
         </Card>
       )}
 
-      {/* COMPARATIVA 6 MESES */}
-      {widgetsActivos.includes('comparativaMensual') && (
-        <Card style={{ marginBottom: 14 }}>
-          <h4 style={{ marginBottom: 12, fontSize: 14, fontWeight: 800 }}>📈 Últimos 6 meses</h4>
-          <div style={{ display: 'flex', gap: 10, fontSize: 11, marginBottom: 10 }}>
-            <span><span style={{ display: 'inline-block', width: 10, height: 10, background: '#1a56db' }}></span> Ingresos</span>
-            <span><span style={{ display: 'inline-block', width: 10, height: 10, background: '#ef4444' }}></span> Gastos</span>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'flex-end', height: 140, padding: '0 8px' }}>
-            {ultimosMeses.map((m, i) => (
-              <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, flex: 1 }}>
-                <div style={{ display: 'flex', gap: 2, alignItems: 'flex-end', height: 100 }}>
-                  <div style={{ width: 14, height: `${(m.ingresos / maxMes) * 100}%`, background: '#1a56db', borderRadius: '2px 2px 0 0', minHeight: 2 }} title={`Ingresos: ${fmt(m.ingresos)}`}></div>
-                  <div style={{ width: 14, height: `${(m.gastos / maxMes) * 100}%`, background: '#ef4444', borderRadius: '2px 2px 0 0', minHeight: 2 }} title={`Gastos: ${fmt(m.gastos)}`}></div>
-                </div>
-                <div style={{ fontSize: 10, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase' }}>{m.label}</div>
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
-
       {/* PRÓXIMOS VENCIMIENTOS FISCALES */}
       {widgetsActivos.includes('proximosVencs') && (
         <Card style={{ marginBottom: 14 }}>
@@ -408,6 +542,27 @@ function KPI({ label, value, accent, sub, onClick }) {
       <div style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', marginBottom: 6 }}>{label}</div>
       <div style={{ fontSize: 20, fontWeight: 900, color: accent }}>{value}</div>
       {sub && <div style={{ fontSize: 11, color: '#6b7280', marginTop: 4 }}>{sub}</div>}
+    </div>
+  )
+}
+function BotonRapido({ onClick, texto, principal }) {
+  return (
+    <button onClick={onClick} style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+      padding: '14px 12px', borderRadius: 12, cursor: 'pointer', fontSize: 15, fontWeight: 800,
+      border: principal ? 'none' : `2px solid ${ROJO}`,
+      background: principal ? ROJO : '#fff', color: principal ? '#fff' : ROJO,
+    }}>
+      <span style={{ fontSize: 20, lineHeight: 1 }}>+</span> {texto}
+    </button>
+  )
+}
+function Dato({ label, valor, color, sub }) {
+  return (
+    <div style={{ minWidth: 0 }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase' }}>{label}</div>
+      <div style={{ fontSize: 15, fontWeight: 900, color, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{valor}</div>
+      {sub && <div style={{ fontSize: 10, color: '#6b7280' }}>{sub}</div>}
     </div>
   )
 }

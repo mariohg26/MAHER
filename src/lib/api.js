@@ -1,4 +1,4 @@
-import { supabase, clienteAislado } from './supabase'
+import { supabase } from './supabase'
 
 // ═══════════════════════════════════════════════════════════════════
 // CAPA DE ACCESO A DATOS
@@ -182,32 +182,36 @@ export async function siguienteNumeroFactura(empresaId, prefijo = 'F', anio) {
   return `${prefijo}-${year}-${siguiente}`
 }
 
-// Crear un usuario nuevo (solo admin).
-// Usa un cliente AISLADO para no afectar la sesión del admin actual.
-export async function crearUsuario({ email, password, nombre, rol, empresaId }) {
-  const aislado = clienteAislado()
-  // 1) Crear en Auth con el cliente aislado (no toca tu sesión)
-  const { data: authData, error: authError } = await aislado.auth.signUp({ email, password })
-  if (authError) throw authError
-  if (!authData.user) throw new Error('No se pudo crear el usuario en el sistema de acceso.')
-
-  // 2) Crear la ficha en la tabla usuarios (con el cliente normal, que tiene tu sesión de admin)
-  const { data, error } = await supabase
-    .from('usuarios')
-    .insert({
-      id: authData.user.id,
-      email,
-      nombre,
-      rol,
-      empresa_id: empresaId,
-      activo: true,
-    })
-    .select()
-    .single()
-  if (error) throw error
-  // Cerrar la sesión del cliente aislado por si acaso
-  try { await aislado.auth.signOut() } catch (e) {}
+// ─────────────────────────────────────────────
+// GESTIÓN DE USUARIOS (solo admin)
+// Se hace a través de la función de Supabase "gestionar-usuarios",
+// que crea el acceso ya confirmado: el usuario entra al momento,
+// sin tener que confirmar ningún email.
+// ─────────────────────────────────────────────
+async function llamarGestionUsuarios(cuerpo) {
+  const { data, error } = await supabase.functions.invoke('gestionar-usuarios', { body: cuerpo })
+  if (error) {
+    // Sacar el mensaje que devuelve la función (viene en el cuerpo de la respuesta)
+    let mensaje = error.message
+    try {
+      const detalle = await error.context?.json?.()
+      if (detalle?.error) mensaje = detalle.error
+    } catch (e) {}
+    throw new Error(mensaje || 'No se pudo completar la operación')
+  }
+  if (data?.error) throw new Error(data.error)
   return data
+}
+
+// Crear un usuario nuevo (entra directamente con su email y contraseña)
+export async function crearUsuario({ email, password, nombre, rol }) {
+  const data = await llamarGestionUsuarios({ accion: 'crear', email, password, nombre, rol })
+  return data.usuario
+}
+
+// Poner una contraseña nueva a un usuario (y dejarlo confirmado si no lo estaba)
+export async function cambiarPasswordUsuario(id, password) {
+  return llamarGestionUsuarios({ accion: 'cambiar_password', id, password })
 }
 
 // Actualizar datos de un usuario (nombre, rol, activo)

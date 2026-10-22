@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useColeccion } from './hooks/useColeccion'
 import { facturasApi, clientesApi, miEmpresaId, siguienteNumeroFactura, empresaApi } from './lib/api'
-import { abrirPDFFactura } from './lib/pdf'
+import { abrirPDFFactura, descargarPDFFactura, compartirPDFFactura, puedeCompartirArchivos } from './lib/pdf'
 
 const ROJO = '#c81019'
 const HOY = new Date().toISOString().split('T')[0]
@@ -15,7 +15,7 @@ function sumarDias(fechaStr, dias) {
 }
 
 // ─── Helpers de cálculo (idénticos a la app original) ───
-const fmt = (n) => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(n || 0)
+const fmt = (n) => (Number(n) || 0).toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ' €'
 const fmtDate = (d) => d ? new Date(d + 'T00:00:00').toLocaleDateString('es-ES') : '—'
 
 // Convierte un texto escrito con coma o punto a número (acepta "3,5" y "3.5")
@@ -65,7 +65,7 @@ const ESTADOS = {
   vencida: { txt: 'Vencida', bg: '#fee2e2', col: '#991b1b' },
 }
 
-export default function Facturas() {
+export default function Facturas({ abrirNuevo, onNuevoAbierto }) {
   const facturas = useColeccion(facturasApi)
   const clientes = useColeccion(clientesApi)
   const [doc, setDoc] = useState(null)        // factura en edición (null = lista)
@@ -121,6 +121,15 @@ export default function Facturas() {
     setModoEdicion(false)
     setAviso(null)
   }
+
+  // Llegamos desde el botón rápido "Nueva factura" del inicio: abrir el formulario
+  // en cuanto estén cargados los clientes
+  useEffect(() => {
+    if (abrirNuevo && !clientes.cargando) {
+      nuevaFactura()
+      onNuevoAbierto && onNuevoAbierto()
+    }
+  }, [abrirNuevo, clientes.cargando])
 
   function editarFactura(f) {
     setDoc({ ...f, lineas: (f.lineas || []).map(l => ({ ...l })) })
@@ -302,12 +311,23 @@ export default function Facturas() {
     } catch (e) { setAviso({ tipo: 'error', texto: 'Error: ' + (e.message || e) }) }
   }
 
-  // ─── Ver PDF ───
-  function verPDF(f) {
-    const cliente = getCliente(f.cliente_id)
+  // ─── PDF: ver, descargar y compartir ───
+  const sePuedeCompartir = puedeCompartirArchivos()
+  function opcionesPDF(f) {
     const idx = parseInt(f.cuenta_bancaria_id, 10)
     const cuenta = isNaN(idx) ? null : cuentasBancarias[idx]
-    abrirPDFFactura(f, cliente, { empresa, cuenta })
+    return { empresa, cuenta }
+  }
+  function verPDF(f) {
+    abrirPDFFactura(f, getCliente(f.cliente_id), opcionesPDF(f))
+  }
+  async function descargarPDF(f) {
+    try { await descargarPDFFactura(f, getCliente(f.cliente_id), opcionesPDF(f)) }
+    catch (e) { setAviso({ tipo: 'error', texto: 'No se pudo generar el PDF: ' + (e.message || e) }) }
+  }
+  async function compartirPDF(f) {
+    try { await compartirPDFFactura(f, getCliente(f.cliente_id), opcionesPDF(f)) }
+    catch (e) { setAviso({ tipo: 'error', texto: 'No se pudo compartir el PDF: ' + (e.message || e) }) }
   }
 
   // ══════════════════ FORMULARIO ══════════════════
@@ -499,7 +519,7 @@ export default function Facturas() {
 
   // ══════════════════ MODAL RECORDATORIO DE COBRO ══════════════════
   if (recordatorio) {
-    return <RecordatorioCobro factura={recordatorio} cliente={getCliente(recordatorio.cliente_id)} onClose={() => setRecordatorio(null)} />
+    return <RecordatorioCobro factura={recordatorio} cliente={getCliente(recordatorio.cliente_id)} opcionesPDF={opcionesPDF(recordatorio)} onClose={() => setRecordatorio(null)} />
   }
 
   // ══════════════════ MODAL COBRO PARCIAL ══════════════════
@@ -601,7 +621,9 @@ export default function Facturas() {
 
                 {/* Botones de acción */}
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 12, paddingTop: 12, borderTop: '1px solid #f3f4f6' }}>
-                  <Btn onClick={() => verPDF(f)} bg="#eff6ff" col="#1e40af">📄 PDF</Btn>
+                  <Btn onClick={() => verPDF(f)} bg="#eff6ff" col="#1e40af">📄 Ver PDF</Btn>
+                  <Btn onClick={() => descargarPDF(f)} bg="#eff6ff" col="#1e40af">📥 Descargar</Btn>
+                  {sePuedeCompartir && <Btn onClick={() => compartirPDF(f)} bg="#dcfce7" col="#166534">📤 Enviar PDF</Btn>}
                   <Btn onClick={() => editarFactura(f)} bg="#f9fafb" col="#374151">✏️ Editar</Btn>
                   {f.estado !== 'cobrada' && <Btn onClick={() => marcarCobrada(f)} bg="#d1fae5" col="#065f46">✓ Cobrada</Btn>}
                   {f.estado !== 'cobrada' && <Btn onClick={() => setCobroParcial({ factura: f, importe: '' })} bg="#fef9c3" col="#854d0e">💶 Cobro parcial</Btn>}
@@ -670,7 +692,8 @@ function Aviso({ aviso }) {
 const EMPRESA_NOMBRE = 'Quesos Maher SL'
 const EMPRESA_NIF = 'B37267259'
 
-function RecordatorioCobro({ factura, cliente, onClose }) {
+function RecordatorioCobro({ factura, cliente, opcionesPDF, onClose }) {
+  const sePuedeCompartir = puedeCompartirArchivos()
   const [tono, setTono] = useState('envio')   // envio | amable | firme | ultima
   const [canal, setCanal] = useState('whatsapp') // whatsapp | email
   const [copiado, setCopiado] = useState(false)
@@ -791,13 +814,23 @@ function RecordatorioCobro({ factura, cliente, onClose }) {
         )}
       </div>
 
-      <button onClick={() => abrirPDFFactura(factura, cliente)}
-        style={{ width: '100%', marginTop: 10, padding: 13, borderRadius: 10, border: '1.5px solid #1e40af', background: '#eff6ff', color: '#1e40af', fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>
-        📄 Abrir el PDF (para adjuntarlo)
-      </button>
+      <div style={{ display: 'grid', gridTemplateColumns: sePuedeCompartir ? '1fr 1fr' : '1fr', gap: 8, marginTop: 10 }}>
+        {sePuedeCompartir && (
+          <button onClick={() => compartirPDFFactura(factura, cliente, opcionesPDF).catch(() => {})}
+            style={{ padding: 13, borderRadius: 10, border: 'none', background: '#166534', color: '#fff', fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>
+            📤 Enviar el PDF
+          </button>
+        )}
+        <button onClick={() => descargarPDFFactura(factura, cliente, opcionesPDF).catch(() => {})}
+          style={{ padding: 13, borderRadius: 10, border: '1.5px solid #1e40af', background: '#eff6ff', color: '#1e40af', fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>
+          📥 Descargar el PDF
+        </button>
+      </div>
 
       <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, padding: 10, marginTop: 10, fontSize: 12, color: '#075985', lineHeight: 1.5 }}>
-        💡 <strong>Para enviar el PDF por WhatsApp:</strong> pulsa "Abrir WhatsApp" (se manda el texto), y luego adjunta el PDF descargándolo con el botón de arriba. WhatsApp no permite adjuntar archivos automáticamente por seguridad.
+        💡 {sePuedeCompartir
+          ? <><strong>Para mandar la factura por WhatsApp:</strong> copia el mensaje, pulsa "Enviar el PDF", elige WhatsApp y el contacto, y pega el mensaje junto al archivo.</>
+          : <><strong>Para mandar el PDF:</strong> descárgalo con el botón de arriba y adjúntalo en WhatsApp Web o en el email.</>}
       </div>
     </div>
   )

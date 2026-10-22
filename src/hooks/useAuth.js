@@ -46,7 +46,15 @@ export function useAuth() {
       setUsuario(u)
       return true
     } catch (e) {
-      setError(e.message === 'Invalid login credentials' ? 'Email o contraseña incorrectos' : e.message)
+      let msg = e.message
+      if (msg === 'Invalid login credentials') msg = 'Email o contraseña incorrectos'
+      else if (msg === 'Email not confirmed') msg = 'Este usuario aún no está activado. Pide al administrador que le ponga una contraseña nueva desde Ajustes → Usuarios.'
+      else if (e.code === 'PGRST116') {
+        // Ha entrado en el sistema pero no tiene ficha visible: está desactivado
+        msg = 'Tu usuario está desactivado. Habla con el administrador.'
+        try { await auth.logout() } catch (err) {}
+      }
+      setError(msg)
       return false
     }
   }

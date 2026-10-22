@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useColeccion } from './hooks/useColeccion'
 import { gastosApi, proveedoresApi, miEmpresaId, subirAdjunto } from './lib/api'
 
@@ -7,7 +7,7 @@ const HOY = new Date().toISOString().split('T')[0]
 
 const CATEGORIAS = ['Suministros', 'Alquiler', 'Software/Suscripciones', 'Material de oficina', 'Transporte', 'Publicidad', 'Servicios profesionales', 'Seguros', 'Formación', 'Otros']
 
-const fmt = (n) => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(n || 0)
+const fmt = (n) => (Number(n) || 0).toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ' €'
 const fmtDate = (d) => d ? new Date(d + 'T00:00:00').toLocaleDateString('es-ES') : '—'
 
 // Convierte un texto escrito con coma o punto a número (acepta "3,5" y "3.5")
@@ -38,7 +38,7 @@ const GASTO_VACIO = {
   adjunto_url: '',
 }
 
-export default function Gastos() {
+export default function Gastos({ abrirNuevo, onNuevoAbierto }) {
   const gastos = useColeccion(gastosApi)
   const proveedores = useColeccion(proveedoresApi)
   const [doc, setDoc] = useState(null)
@@ -62,6 +62,14 @@ export default function Gastos() {
     .sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)))
 
   function nuevo() { setDoc({ ...GASTO_VACIO, lineas: [{ desc: '', cant: 1, precio: 0, iva: 0.21 }] }); setModoEdicion(false); setAviso(null) }
+  // Llegamos desde el botón rápido "Nuevo gasto" del inicio
+  useEffect(() => {
+    if (abrirNuevo) {
+      nuevo()
+      onNuevoAbierto && onNuevoAbierto()
+    }
+  }, [abrirNuevo])
+
   function editar(g) { setDoc({ ...g, lineas: (g.lineas || []).map(l => ({ ...l })) }); setModoEdicion(true); setAviso(null) }
 
   function addLinea() { setDoc({ ...doc, lineas: [...doc.lineas, { desc: '', cant: 1, precio: 0, iva: 0.21 }] }) }
