@@ -26,6 +26,20 @@ const fmtNum = (n) => {
 }
 const fmtDate = (d) => d ? new Date(d + 'T00:00:00').toLocaleDateString('es-ES') : '—'
 
+// Las fuentes básicas del PDF solo saben dibujar los caracteres "occidentales"
+// (WinAnsi). Cualquier otro (signo menos tipográfico, emojis…) sale como
+// basura y además descuadra el texto, así que lo cambiamos o lo quitamos.
+const EXTRA_WINANSI = '€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ'
+const SUSTITUTOS = { '−': '-', '‐': '-', '‑': '-', '‒': '-', '―': '-', '′': "'", '″': '"', '\u00a0': ' ', '\u202f': ' ', '\u2009': ' ' }
+function limpiar(texto) {
+  return String(texto ?? '').replace(/./gsu, ch => {
+    if (SUSTITUTOS[ch]) return SUSTITUTOS[ch]
+    const c = ch.codePointAt(0)
+    if (c === 10 || (c >= 32 && c <= 126) || (c >= 160 && c <= 255) || EXTRA_WINANSI.includes(ch)) return ch
+    return ''
+  })
+}
+
 function calcTotales(doc) {
   const lineas = doc.lineas || []
   const base = lineas.reduce((s, l) => s + (Number(l.cant) || 0) * (Number(l.precio) || 0), 0)
@@ -75,6 +89,11 @@ export async function generarPDFFactura(doc, cliente, opciones = {}) {
   const candidatas = [modTabla.autoTable, modTabla.default, modTabla.default?.default, modTabla.default?.autoTable]
   const autoTable = candidatas.find(f => typeof f === 'function')
   const pdf = new jsPDF({ unit: 'mm', format: 'a4' })
+  // Todo lo que se escribe en el PDF pasa por el filtro de caracteres
+  const textoOriginal = pdf.text.bind(pdf)
+  pdf.text = (t, ...resto) => textoOriginal(Array.isArray(t) ? t.map(limpiar) : limpiar(t), ...resto)
+  const partirOriginal = pdf.splitTextToSize.bind(pdf)
+  pdf.splitTextToSize = (t, ...resto) => partirOriginal(limpiar(t), ...resto)
   const W = 210, M = 15, DER = W - M
 
   const emp = datosEmpresa(opciones.empresa)
@@ -164,7 +183,7 @@ export async function generarPDFFactura(doc, cliente, opciones = {}) {
     margin: { left: M, right: M, bottom: 22 },
     head: [['Descripción', 'Cant.', 'Precio', 'IVA', 'Importe']],
     body: (doc.lineas || []).map(l => [
-      l.desc || '',
+      limpiar(l.desc || ''),
       fmtNum(l.cant),
       fmt(l.precio),
       Math.round((Number(l.iva) || 0) * 100) + ' %',
@@ -215,7 +234,7 @@ export async function generarPDFFactura(doc, cliente, opciones = {}) {
   }
   filaTotal('Base imponible', fmt(totales.base))
   filaTotal('IVA', fmt(totales.iva))
-  if (totales.irpf > 0) filaTotal(`Retención IRPF (${Math.round((Number(doc.retencion_irpf) || 0) * 100)} %)`, '−' + fmt(totales.irpf), true)
+  if (totales.irpf > 0) filaTotal(`Retención IRPF (${Math.round((Number(doc.retencion_irpf) || 0) * 100)} %)`, '- ' + fmt(totales.irpf), true)
   pdf.setFillColor(ROJO[0], ROJO[1], ROJO[2])
   pdf.roundedRect(xT, yT + 1, 70, 11, 1.5, 1.5, 'F')
   pdf.setFont('helvetica', 'bold'); pdf.setFontSize(10); pdf.setTextColor(255, 255, 255)

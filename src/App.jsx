@@ -77,7 +77,7 @@ function AppContent({ usuario, onLogout }) {
       </div>
 
       {/* Menú de navegación */}
-      <div style={{ background: '#fff', borderBottom: '1px solid #eee', padding: '0 16px', display: 'flex', gap: 4, maxWidth: 900, margin: '0 auto', overflowX: 'auto' }}>
+      <div style={{ background: '#fff', borderBottom: '1px solid #eee', padding: '0 16px', display: 'flex', gap: 4, maxWidth: 900, margin: '0 auto', overflowX: 'auto', overflowY: 'hidden', scrollbarWidth: 'none' }}>
         {SECCIONES.filter(s => puedeVer(s.id)).map(s => (
           <Pestana key={s.id} activa={seccionVisible === s.id} onClick={() => setSeccion(s.id)}>{s.label}</Pestana>
         ))}
