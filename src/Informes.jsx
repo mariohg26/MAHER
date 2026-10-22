@@ -44,7 +44,7 @@ export default function Informes() {
   const [ano, setAno] = useState(ANO_ACTUAL)
   const [periodo202, setPeriodo202] = useState(periodo202Actual())
   const [empresa, setEmpresa] = useState(null)
-  const [ajustes, setAjustes] = useState({ regimenIS: 'erd', baseUltimoIS: '' })
+  const [ajustes, setAjustes] = useState({ regimenIS: 'general', baseUltimoIS: '' })
   const [avisoAjuste, setAvisoAjuste] = useState('')
 
   useEffect(() => {
@@ -54,7 +54,7 @@ export default function Informes() {
       let local = {}
       try { local = JSON.parse(localStorage.getItem('maher_ajustes_fiscales')) || {} } catch (err) {}
       setAjustes({
-        regimenIS: c.regimenIS || local.regimenIS || 'erd',
+        regimenIS: c.regimenIS || local.regimenIS || 'general',
         baseUltimoIS: c.baseUltimoIS ?? local.baseUltimoIS ?? '',
       })
     }).catch(() => {})
@@ -449,7 +449,7 @@ function SelectorRegimen({ ajustes, guardar, aviso }) {
       <select style={{ ...selStyle, width: '100%' }} value={ajustes.regimenIS} onChange={e => guardar({ regimenIS: e.target.value })}>
         {Object.entries(REGIMENES_IS).map(([id, r]) => <option key={id} value={id}>{r.label}</option>)}
       </select>
-      <div style={{ fontSize: 11, color: '#6b7280', marginTop: 6 }}>Se mira la facturación del año anterior. Las sociedades patrimoniales (solo alquilan inmuebles sin actividad) no pueden usar el de microempresa.</div>
+      <div style={{ fontSize: 11, color: '#6b7280', marginTop: 6 }}>Las sociedades patrimoniales (como Quesos Maher) tributan siempre al tipo general del 25 %: no pueden usar el de microempresa ni el de pyme.</div>
     </div>
   )
 }

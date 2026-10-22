@@ -154,7 +154,7 @@ export function calcular347({ facturas, gastos, clientes = [], proveedores = [],
 export const REGIMENES_IS = {
   micro: { label: 'Microempresa (facturación < 1 M€)' },
   erd: { label: 'Pyme de reducida dimensión (< 10 M€)' },
-  general: { label: 'Tipo general (25 %)' },
+  general: { label: 'Tipo general 25 % (también sociedades patrimoniales)' },
 }
 export function tiposIS(regimen, ano) {
   if (regimen === 'micro') {
@@ -175,7 +175,7 @@ export function cuotaIS(base, regimen, ano) {
 }
 
 // Cuenta de pérdidas y ganancias y estimación del Impuesto sobre Sociedades
-export function calcularPyG({ facturas, gastos, ano, regimen = 'erd' }) {
+export function calcularPyG({ facturas, gastos, ano, regimen = 'general' }) {
   const fac = facturas.filter(f => enAno(f.fecha, ano))
   const gas = gastos.filter(g => enAno(g.fecha, ano))
   const ingresos = r2(fac.reduce((s, f) => s + desglose(f).base, 0))
@@ -206,7 +206,7 @@ export function porcentaje202Base(regimen, ano) {
   const t = tiposIS(regimen, ano)
   return { tramo1: Math.floor(t.tramo1 * 100 * 5 / 7) / 100, resto: Math.floor(t.resto * 100 * 5 / 7) / 100, limiteTramo1: t.limiteTramo1 }
 }
-export function calcular202({ facturas, gastos, ano, periodo, regimen = 'erd', baseUltimoIS = 0 }) {
+export function calcular202({ facturas, gastos, ano, periodo, regimen = 'general', baseUltimoIS = 0 }) {
   // Modalidad de cuota (art. 40.2): la normal si no has optado por otra
   const modalidadCuota = r2(Math.max(0, Number(baseUltimoIS) || 0) * 0.18)
 
